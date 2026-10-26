@@ -12,11 +12,17 @@ from app.database import get_db
 from app.dependencies import get_current_user, require_permission
 from app.models.inspection import Inspection
 from app.models.user import User
-from app.schemas.inspection import InspectionList, InspectionResult, RCAPayload
+from app.schemas.inspection import InspectionList, InspectionResult, RCAPayload, RCARequestOut
 from app.services.authorization import Permission, can_view_inspection, inspection_scope_filter
 from app.services.detector import get_detector
 from app.services.inspection_service import InspectionPermissionError, annotated_dir, run_inspection
-from app.services.report_service import build_rca_payload, build_report, inspection_to_result
+from app.services.report_service import (
+    UnsupportedDefectClassError,
+    build_module_c_rca_request,
+    build_rca_payload,
+    build_report,
+    inspection_to_result,
+)
 from app.utils.image_utils import ImageValidationError
 
 router = APIRouter(tags=["Inspection"])
@@ -125,4 +131,39 @@ def annotated_image(inspection_id: str, user: User = Depends(get_current_user),
 def rca_payload(inspection_id: str, user: User = Depends(get_current_user),
                 db: Session = Depends(get_db)):
     return build_rca_payload(get_visible_inspection(db, user, inspection_id))
+
+
+@router.get(
+    "/inspections/{inspection_id}/rca-request",
+    response_model=RCARequestOut,
+    response_model_exclude_none=True,
+    tags=["Integration (Section C)"],
+    summary="Module C compliant RCARequest payload",
+)
+def rca_request(
+    inspection_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+    settings: Settings = Depends(get_settings),
+):
+    insp = get_visible_inspection(db, user, inspection_id)
+    try:
+        return build_module_c_rca_request(
+            insp,
+            supported_classes=settings.rca_supported_classes_list,
+        )
+    except UnsupportedDefectClassError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail={
+                "message": str(exc),
+                "unsupported_classes": exc.unsupported_classes,
+                "supported_classes": exc.supported_classes,
+            },
+        )
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+            detail=str(exc),
+        )
 

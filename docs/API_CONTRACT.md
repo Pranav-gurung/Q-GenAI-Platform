@@ -1,9 +1,9 @@
-# Module C API contract (for the Module B owner)
+# Module C API Contract (Module B/D Integration)
 
-**Status: PROPOSED.** Fields below are what Module C implements today. Please confirm or request changes; the
-schema lives in one place (`module_c/models.py::validate_request` + `module_c/api.py`) so adjustments are cheap.
-You do not need to import any Module C code: use `schemas/rca_request.schema.json`, `schemas/rca_response.schema.json`
-or the live OpenAPI (`GET /openapi.json`, `/docs`; `python scripts/export_openapi.py` writes it to a file).
+**Status: RECONCILED & IMPLEMENTED.**
+The schema defined below is implemented and validated by both Module C (`module_c/models.py::validate_request` and `module_c/api.py`)
+and Module B/D (`module_b_d/app/services/report_service.py` and `module_b_d/app/routers/inspections.py`).
+JSON Schema files are maintained at `schemas/rca_request.schema.json` and `schemas/rca_response.schema.json`.
 
 ## Endpoints
 | Method | Path | Purpose |
@@ -25,6 +25,11 @@ Validation: ids non-empty `[A-Za-z0-9._:-]{1,128}`; `confidence` finite in [0,1]
 dimensions are sent); `class` must be in the configured class list (`RCA_SUPPORTED_CLASSES` / `RCA_CLASS_MAP_PATH`;
 **must match Module A's class map**); at most `RCA_MAX_DEFECTS` defects; **empty `defects` is valid**.
 The original image is not needed.
+
+*Module B/D compatibility:* Module B provides an adapter endpoint `GET /inspections/{inspection_id}/rca-request`
+which maps inspection records directly into this schema, utilizing `insp.image_sha256` as `image_id`, converting
+`{"x1", "y1", "x2", "y2"}` bounding boxes to `[x_min, y_min, x_max, y_max]`, and moving operational metadata into
+`inspection_context`.
 
 ## Response and status semantics
 | Situation | HTTP | `status` | Body |

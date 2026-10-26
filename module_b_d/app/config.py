@@ -61,6 +61,9 @@ class Settings(BaseSettings):
     # somewhere other than the database (see docs/SECURITY.md).
     audit_checkpoint_key: str = ""
 
+    # --- Module C Integration ----------------------------------------------
+    rca_supported_classes: str = "scratch,crack,dent,corrosion"
+
     @field_validator("models_dir", "storage_dir")
     @classmethod
     def _absolute(cls, v: Path) -> Path:
@@ -77,6 +80,10 @@ class Settings(BaseSettings):
     @property
     def model_path(self) -> Path:
         return self.models_dir / self.model_weights
+
+    @property
+    def rca_supported_classes_list(self) -> list[str]:
+        return [c.strip().lower() for c in self.rca_supported_classes.split(",") if c.strip()]
 
     def validate_for_startup(self) -> None:
         """Fail fast on insecure configuration."""

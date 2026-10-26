@@ -120,6 +120,34 @@ class RCAPayload(BaseModel):
     image_height: int
 
 
+class RCADefectItem(BaseModel):
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    class_: str = Field(alias="class", description="Supported defect class name")
+    confidence: float = Field(ge=0.0, le=1.0, description="Model confidence score in [0.0, 1.0]")
+    bbox: list[float] | None = Field(default=None, min_length=4, max_length=4,
+                                     description="[x_min, y_min, x_max, y_max] in original-image pixels")
+    mask_ref: str | None = Field(default=None, description="Optional mask reference")
+
+
+class RCARequestOut(BaseModel):
+    """Schema strictly conforming to Module C RCARequest (schemas/rca_request.schema.json)."""
+
+    model_config = ConfigDict(extra="forbid", populate_by_name=True)
+
+    inspection_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$")
+    image_id: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$")
+    model_version: str = Field(pattern=r"^[A-Za-z0-9][A-Za-z0-9._:\-]{0,127}$")
+    status: str | None = Field(default=None, max_length=64)
+    defects: list[RCADefectItem]
+    image_width: int | None = Field(default=None, gt=0)
+    image_height: int | None = Field(default=None, gt=0)
+    part_type: str | None = Field(default=None, max_length=300)
+    material: str | None = Field(default=None, max_length=300)
+    production_process: str | None = Field(default=None, max_length=300)
+    inspection_context: str | None = Field(default=None, max_length=300)
+
+
 class PolicyOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
