@@ -1,0 +1,11 @@
+# Core (both modules)
+numpy>=1.26
+Pillow>=10.0
+# Module C
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic>=2.5
+pymupdf>=1.24            # preferred PDF extractor (pypdf is used as a fallback if absent)
+pypdf>=4.0
+sentence-transformers>=2.7   # only if RCA_EMBEDDING_BACKEND=sentence_transformers
+chromadb>=0.5                # only if RCA_VECTOR_STORE=chroma

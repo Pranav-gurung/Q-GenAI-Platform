@@ -1,0 +1,34 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RCARequest (Module B -> Module C, POST /rca)",
+  "description": "Proposed contract; confirm with the Module B owner. bbox = [x_min, y_min, x_max, y_max] in ORIGINAL-image pixels.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["inspection_id", "image_id", "model_version", "defects"],
+  "properties": {
+    "inspection_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$"},
+    "image_id": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$"},
+    "model_version": {"type": "string", "pattern": "^[A-Za-z0-9][A-Za-z0-9._:\\-]{0,127}$"},
+    "status": {"type": "string", "maxLength": 64, "description": "Detector-side inspection status, e.g. review_required. Informational."},
+    "defects": {
+      "type": "array", "description": "May be empty. Maximum length is configurable (RCA_MAX_DEFECTS, default 20).",
+      "items": {
+        "type": "object", "additionalProperties": false, "required": ["class", "confidence"],
+        "properties": {
+          "class": {"type": "string", "description": "Must be one of the configured classes (Module A class map)."},
+          "confidence": {"type": "number", "minimum": 0, "maximum": 1},
+          "bbox": {"type": "array", "items": {"type": "number"}, "minItems": 4, "maxItems": 4,
+                   "description": "x_max > x_min, y_max > y_min, all >= 0 and <= image size when given."},
+          "mask_ref": {"type": "string"}
+        },
+        "anyOf": [{"required": ["bbox"]}, {"required": ["mask_ref"]}]
+      }
+    },
+    "image_width": {"type": "integer", "minimum": 1, "description": "Optional; must be sent together with image_height; enables bounds checking."},
+    "image_height": {"type": "integer", "minimum": 1},
+    "part_type": {"type": "string", "maxLength": 300},
+    "material": {"type": "string", "maxLength": 300},
+    "production_process": {"type": "string", "maxLength": 300},
+    "inspection_context": {"type": "string", "maxLength": 300}
+  }
+}

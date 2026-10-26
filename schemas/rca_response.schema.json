@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "RCAResponse (Module C -> Module B), HTTP 200 and error bodies",
+  "type": "object",
+  "required": ["request_id", "inspection_id", "status", "summary", "observations", "possible_causes",
+               "recommended_actions", "citations", "defect_analyses", "unknowns", "notes", "limitations", "error"],
+  "properties": {
+    "request_id": {"type": "string"},
+    "inspection_id": {"type": ["string", "null"]},
+    "image_id": {"type": ["string", "null"]},
+    "model_version": {"type": ["string", "null"]},
+    "status": {"enum": ["success", "insufficient_evidence", "error"]},
+    "summary": {"type": "string", "description": "Built by the server from detector input; never LLM-authored."},
+    "observations": {"type": "array", "items": {"type": "string"}, "description": "What the detector reported. Built from the request, not by the LLM."},
+    "possible_causes": {"type": "array", "items": {
+      "type": "object", "required": ["defect_class", "defect_indices", "cause", "status", "evidence"],
+      "properties": {
+        "defect_class": {"type": "string"}, "defect_indices": {"type": "array", "items": {"type": "integer"}},
+        "cause": {"type": "string"},
+        "status": {"enum": ["supported_by_document", "hypothesis", "requires_investigation"]},
+        "evidence": {"type": "array", "items": {"type": "string"}, "description": "chunk_ids present in `citations`. Non-empty whenever status = supported_by_document."}}}},
+    "recommended_actions": {"type": "array", "items": {
+      "type": "object", "required": ["defect_class", "defect_indices", "action", "basis", "citations"],
+      "properties": {
+        "defect_class": {"type": "string"}, "defect_indices": {"type": "array", "items": {"type": "integer"}},
+        "action": {"type": "string"},
+        "basis": {"enum": ["document", "investigation_suggestion"]},
+        "citations": {"type": "array", "items": {"type": "string"}, "description": "chunk_ids present in `citations`."}}}},
+    "citations": {"type": "array", "items": {
+      "type": "object", "required": ["document_id", "title", "version", "page", "chunk_id", "passage"],
+      "properties": {"document_id": {"type": "string"}, "title": {"type": "string"}, "version": {"type": "string"},
+                     "page": {"type": "integer"}, "section": {"type": ["string", "null"]}, "chunk_id": {"type": "string"},
+                     "score": {"type": "number"}, "passage": {"type": "string", "description": "Actual indexed passage text."}}}},
+    "defect_analyses": {"type": "array", "items": {
+      "type": "object", "required": ["defect_class", "defect_indices", "status"],
+      "properties": {"defect_class": {"type": "string"}, "defect_indices": {"type": "array", "items": {"type": "integer"}},
+                     "status": {"enum": ["analyzed", "insufficient_evidence"]},
+                     "n_candidates": {"type": "integer"}, "n_relevant_passages": {"type": "integer"},
+                     "n_excluded_no_class_term": {"type": "integer"}, "best_score": {"type": ["number", "null"]}}}},
+    "unknowns": {"type": "array", "items": {"type": "string"}},
+    "notes": {"type": "array", "items": {"type": "string"}},
+    "limitations": {"type": "string"},
+    "error": {"type": ["object", "null"], "properties": {"code": {"type": "string"}, "message": {"type": "string"}}},
+    "generated_at": {"type": "string"}
+  }
+}

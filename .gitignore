@@ -1,0 +1,17 @@
+# secrets / env
+.env
+*.key
+
+# generated data & indexes (re-creatable; may be large or licensed)
+data/
+documents/approved/*
+!documents/approved/README.md
+*.sqlite3
+
+# python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+*.egg-info/
