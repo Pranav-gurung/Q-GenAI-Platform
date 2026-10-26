@@ -38,8 +38,19 @@ STAGE_DESCRIPTIONS: dict[FulfillmentStage, str] = {
 }
 
 
+# Canonical 1-based order (RECEIVING = 1 ... DELIVERY = 6), derived from FULFILLMENT_FLOW: the only place
+# stage order is defined. Everything that sorts or compares stages must use these helpers.
+STAGE_ORDER: dict[FulfillmentStage, int] = {stage: i + 1 for i, stage in enumerate(FULFILLMENT_FLOW)}
+
+
 def stage_position(stage: FulfillmentStage) -> int:
+    """0-based index in FULFILLMENT_FLOW."""
     return FULFILLMENT_FLOW.index(stage)
+
+
+def stages_between(earlier: FulfillmentStage, later: FulfillmentStage) -> tuple[FulfillmentStage, ...]:
+    """Stages strictly between two stages in flow order (empty if adjacent or not in order)."""
+    return FULFILLMENT_FLOW[stage_position(earlier) + 1: stage_position(later)]
 
 
 def upstream_stages(stage: FulfillmentStage) -> tuple[FulfillmentStage, ...]:

@@ -29,7 +29,7 @@ def inspection_to_event(insp: Inspection) -> InspectionEvent:
     image = insp.current_image
     return InspectionEvent(
         inspection_id=insp.inspection_id, store_id=insp.store_id, sku_id=insp.sku_id, order_id=insp.order_id,
-        stage=insp.stage, status=insp.status, source=insp.source, operator_id=insp.operator_id,
+        item_id=insp.item_id, stage=insp.stage, status=insp.status, source=insp.source, operator_id=insp.operator_id,
         image=image_to_schema(image) if image else None,
         result_id=insp.result.result_id if insp.result else None,
         decision=insp.decision,

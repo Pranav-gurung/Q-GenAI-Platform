@@ -18,6 +18,7 @@
       <label>Store <select name="store_id" required></select></label>
       <label>SKU <select name="sku_id" required></select></label>
       <label>Fulfillment stage <select name="stage" required></select></label>
+      <label>Item ID <span class="opt">(unit / LPN barcode; links stages)</span> <input name="item_id" placeholder="UNIT-0001" maxlength="64"></label>
       <label>Order ID <span class="opt">(optional)</span> <input name="order_id" placeholder="ORD-100245" maxlength="64"></label>
       <label>Operator ID <span class="opt">(optional)</span> <input name="operator_id" placeholder="OP-17" maxlength="64"></label>
       <label>Product image <input type="file" name="image" accept="image/jpeg,image/png,image/webp" required></label>
@@ -42,6 +43,21 @@
           <thead><tr><th>Defect</th><th>Confidence</th><th>Severity</th><th>Box (px)</th></tr></thead>
           <tbody></tbody>
         </table>
+      </div>
+      <div id="r-fulfillment" hidden>
+        <h3>Fulfillment history</h3>
+        <p id="r-trace" class="meta"></p>
+        <ol id="r-timeline" class="timeline"></ol>
+        <div id="r-defects"></div>
+        <p class="meta disclaimer">First <em>observed</em> stage from available inspections; not proof of physical cause.</p>
+      </div>
+      <div id="r-rca" hidden>
+        <h3>GenAI RCA <span class="ai-badge">AI-generated · evidence-grounded</span></h3>
+        <p id="r-rca-meta" class="meta"></p>
+        <p id="r-rca-summary"></p>
+        <div id="r-rca-defects"></div>
+        <button type="button" id="r-rca-generate" class="secondary" hidden>Generate GenAI RCA</button>
+        <p class="meta disclaimer" id="r-rca-disclaimer"></p>
       </div>
       <h3>Pipeline stages</h3>
       <ol id="r-stages"></ol>

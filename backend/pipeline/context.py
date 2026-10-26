@@ -32,6 +32,7 @@ class InspectionInfo:
     stage: FulfillmentStage
     order_id: str | None = None
     metadata: dict = field(default_factory=dict)
+    item_id: str | None = None  # physical unit / handling-unit id that links observations across stages
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,10 @@ class PipelineContext:
 
     errors: list[ContextError] = field(default_factory=list)
     history: list[HistoryEntry] = field(default_factory=list)
+
+    # Prior persisted observations of the same item/order trace (read-only input for PIPELINE_ANALYSIS;
+    # loaded by the inspection service, so pipeline modules never touch the database).
+    trace_observations: tuple = ()
 
     @property
     def inspection_id(self) -> str:

@@ -2,12 +2,14 @@
 
 **Computer-vision-first quality intelligence for quick-commerce dark stores.**
 
-> **Status: Part 2 of 7, Computer Vision inspection engine** (on top of Part 1: foundation + pipeline).
-> Implemented: inspection pipeline, API, database, operator UI, an image quality gate, a **real YOLOv8
-> CV engine**, deterministic decision rules, and dataset / training / evaluation tooling.
+> **Status: Part 4 of 7, GenAI Root-Cause Analysis** (on top of Parts 1-3: foundation + pipeline, computer
+> vision, fulfillment pipeline intelligence). Implemented: inspection pipeline, API, database, operator UI, an
+> image quality gate, a **real YOLOv8 CV engine**, deterministic decision rules, dataset / training / evaluation
+> tooling, **deterministic first-defect stage attribution**, and an **evidence-grounded GenAI RCA** that only adds
+> labelled hypotheses, actions and checks.
 > **The only trained model is a demo model trained on SYNTHETIC data.** It proves the engineering end to end.
 > It is **not** evidence of accuracy on real product photos (see [Computer Vision](#computer-vision-part-2)).
-> Fulfillment analysis, RCA, corrective actions and active learning are still placeholders (`NOT_IMPLEMENTED`).
+> RAG / SOP retrieval and active learning are not implemented yet.
 
 ---
 
@@ -67,16 +69,16 @@ a **PipelineOrchestrator**. Each AI capability is a plug-in module behind a type
                 └────────┬────────┘
                          ▼
                 ┌─────────────────┐
-                │ Fulfillment     │   PipelineAnalyzer   → stub  (Part 4)
+                │ Fulfillment     │   PipelineAnalyzer   → deterministic (Part 3 ✅)
                 │ Analysis        │
                 └────────┬────────┘
                          ▼
                 ┌─────────────────┐
-                │ RCA / GenAI     │   RCAEngine          → stub  (Part 5)
+                │ RCA / GenAI     │   RCAEngine          → genai (Part 4 ✅)
                 └────────┬────────┘
                          ▼
                 ┌─────────────────┐
-                │ SOP / Corrective│   ActionEngine       → stub  (Part 5)
+                │ SOP / Corrective│   ActionEngine       → rca (Part 4 ✅; SOP/RAG: Part 5)
                 │ Action          │
                 └────────┬────────┘
                          ▼
@@ -118,8 +120,10 @@ a **PipelineOrchestrator**. Each AI capability is a plug-in module behind a type
 | **Part 2:** Deterministic decision rules (`DECISION_ENGINE=rules`) | ✅ | `backend/pipeline/decision_rules.py` |
 | **Part 2:** Defect taxonomy, severity mapping, postprocessing | ✅ | `ml/cv/taxonomy.yaml`, `severity.py`, `postprocess.py` |
 | **Part 2:** Dataset validator, synthetic demo data, training, evaluation, predict, visualize, benchmark, ONNX export | ✅ | `ml/cv/*.py` |
+| **Part 3:** Fulfillment stage history + deterministic first-defect attribution (`PIPELINE_ANALYSIS_ENGINE=deterministic`), `GET /api/inspections/{id}/pipeline`, UI timeline | ✅ | `backend/fulfillment/`, `backend/services/fulfillment_service.py` |
+| **Part 4:** Evidence-grounded GenAI RCA (`RCA_ENGINE=genai`, `ACTION_ENGINE=rca`), LLM provider abstraction (Anthropic + mock), guardrails, `GET /api/inspections/{id}/rca`, UI panel | ✅ | `backend/rca/`, `backend/services/rca_service.py` |
 
-**Not implemented yet (by design):** fulfillment analysis, RCA, RAG / vector DB, LLMs, SOP generation,
+**Not implemented yet (by design):** RAG / vector DB / SOP retrieval,
 active-learning training, analytics dashboards, user accounts / RBAC. Also not implemented: any model trained
 on real product photos.
 
@@ -197,7 +201,7 @@ The processing states mean "this stage is running". For example, `ACTION_GENERAT
 which the action engine runs.
 
 **Orchestrator routing (real results only):** quality gate rejects → `REQUIRES_REVIEW`;
-decision PASS → `COMPLETED`; decision REVIEW → `REQUIRES_REVIEW`; decision FAIL with an action →
+decision PASS → `COMPLETED`; decision REVIEW → `PIPELINE_ANALYSIS` (stage history for the reviewer) → `REQUIRES_REVIEW`; decision FAIL with an action →
 `COMPLETED`; no real decision → `REQUIRES_REVIEW`; module raises or returns the wrong type → `FAILED`
 (`MODULE_ERROR` / `MODULE_CONTRACT_VIOLATION`); module raises `NotImplementedError` → recorded as
 `NOT_IMPLEMENTED`.
@@ -209,9 +213,9 @@ decision PASS → `COMPLETED`; decision REVIEW → `REQUIRES_REVIEW`; decision F
 | `ImageQualityGate.assess` | `ImageInput → ImageQualityResult` | `stub`, **`basic`** (Part 2); advanced checks in Part 3 |
 | `CVEngine.detect` | `ImageInput → CVResult` (detections: bbox, defect type, confidence, severity; inference metadata) | `stub`, **`yolov8`** (Part 2) |
 | `DecisionEngine.decide` | `CVResult + InspectionInfo → QualityDecision` (PASS/FAIL/REVIEW, reason, confidence, severity, source) | `stub`, **`rules`** (Part 2) |
-| `PipelineAnalyzer.analyze` | `PipelineContext → PipelineAnalysis` (suspected stage, likelihoods, evidence) | `stub` (Part 4) |
-| `RCAEngine.analyze` | `PipelineContext → RCAResult` (possible causes, evidence, confidence, investigation) | `stub` (Part 5) |
-| `ActionEngine.recommend` | `RCAResult + context → ActionRecommendation` (action, priority, responsible stage, instructions) | `stub` (Part 5) |
+| `PipelineAnalyzer.analyze` | `PipelineContext → PipelineAnalysis` (structured `trace_analysis`, suspected stage, evidence codes) | `stub`, **`deterministic`** (Part 3) |
+| `RCAEngine.analyze` | `PipelineContext → RCAResult` (structured `root_cause_analysis`; hypotheses, no invented confidence) | `stub`, **`genai`** (Part 4) |
+| `ActionEngine.recommend` | `RCAResult + context → ActionRecommendation` (action, priority, optional responsible stage, instructions) | `stub`, **`rca`** (Part 4) |
 | Feedback | `InspectionResult + operator feedback → FeedbackRecord` (`learning_status=PENDING`) | stored (Part 1); learning in Part 6 |
 
 Modules are registered in `backend/pipeline/registry.py` and selected by env var. Part 2 plugged in the CV engine this way:
@@ -233,7 +237,7 @@ if it can't run it returns `UNAVAILABLE` rather than a result.
 | Table | Answers |
 |---|---|
 | `stores`, `skus` | Which store? Which SKU? |
-| `inspections` | What was inspected, at which fulfillment stage, when, current pipeline status, final decision |
+| `inspections` | What was inspected (store, SKU, order, **item**), at which fulfillment stage, when, current pipeline status, final decision |
 | `inspection_images` | Which image (file name, MIME type, size, dimensions, hash, storage reference) |
 | `pipeline_events` | Append-only history: every transition, module outcome (+ duration), error |
 | `inspection_results` | Each module's result (JSON, including its status) + model versions that produced it |
@@ -488,6 +492,285 @@ CV_MODEL_PATH=artifacts/cv/qgenai-yolov8n-synthetic-v1/model/best.pt
 The upload endpoint, the database and the UI are unchanged. The UI now shows the decision, the detections
 (type, confidence, severity, box), the model version and inference time, with boxes drawn on the uploaded image.
 
+## Fulfillment Pipeline Intelligence (Part 3)
+
+> **The system identifies the first observed stage at which a defect appears based on available inspection
+> evidence. It does not prove physical causality.**
+
+Each layer answers one question, and none of them answers another layer's:
+
+| Layer | Question | Implementation |
+|---|---|---|
+| Computer vision | What is visually present in this image? | `CV_ENGINE=yolov8` |
+| Decision rules | Does this observation pass, fail or need review? | `DECISION_ENGINE=rules` |
+| **Fulfillment analysis** | **Across the item's observations, when did each defect first appear?** | `PIPELINE_ANALYSIS_ENGINE=deterministic` |
+| RCA (Part 5) | Why might it have happened, and what should operators do? | not implemented |
+
+Fulfillment analysis is pure, deterministic code (`backend/fulfillment/`). It uses no ML, no LLM and no
+probabilities. The same observations always give the same result.
+
+### Stages and observation history
+
+```
+SUPPLIER → RECEIVING(1) → STORAGE(2) → PICKING(3) → PACKING(4) → DISPATCH(5) → DELIVERY(6) → CUSTOMER
+```
+
+Stage order is defined once (`FULFILLMENT_FLOW` / `STAGE_ORDER` in `backend/domain/fulfillment.py`).
+
+Inspections of the same physical item form a **trace**:
+
+* **store + SKU + `item_id`**: a unit or handling-unit barcode (LPN). This is the preferred key because
+  RECEIVING and STORAGE happen before any order exists.
+* **store + SKU + `order_id`**: used only when there is no `item_id`.
+* With neither, the inspection is analysed on its own (flag `NO_TRACE_IDENTIFIER`).
+
+Observations of different items, orders, SKUs or stores are **never combined**.
+
+Each inspection becomes a `PipelineObservation`. It is rebuilt from persisted results (no new inference):
+
+1. **Operator feedback** comes first. It sets the outcome, and the operator's defect types if given.
+2. Otherwise the **rules decision** sets PASS / FAIL / REVIEW, with the CV detection types.
+3. With **no usable decision** (image quality rejected, CV unavailable, failed run), the observation is **REVIEW**.
+   It is never treated as a PASS. Inspections still in progress are not evidence yet.
+
+### Algorithm (per defect type: defect identity = defect type)
+
+```
+for each defect type D:
+  first      = earliest inspected stage showing D
+  previous   = the inspected stage just before `first`
+  last good  = latest stage before `first` that explicitly PASSED
+  missing    = stages between `previous` and `first` that were never inspected
+
+  classification (first rule that matches):
+    timestamps out of stage order        → UNCERTAIN              TIMESTAMP_ORDER_CONFLICT
+    first == RECEIVING                   → PRE_EXISTING           DEFECT_PREEXISTING   (present on arrival)
+    no previous inspection               → INSUFFICIENT_EVIDENCE  NO_PRIOR_OBSERVATION
+    previous stage was REVIEW            → UNCERTAIN              PREVIOUS_STAGE_REVIEW
+    another defect type vanished as D
+      appeared (possible re-classification) → UNCERTAIN           AMBIGUOUS_DEFECT_IDENTITY
+    uninspected stages in between        → INSUFFICIENT_EVIDENCE  MISSING_INTERMEDIATE_OBSERVATIONS
+    otherwise                            → NEW_DEFECT             NEW_DEFECT_AFTER_GOOD_STAGE
+                                                                  (or …_AFTER_DEFECTIVE_STAGE)
+```
+
+**Missing stages are never assumed good.** For example, with RECEIVING = PASS and PACKING = FAIL, the result is
+"first observed at PACKING, last known good RECEIVING, STORAGE and PICKING not inspected" →
+`INSUFFICIENT_EVIDENCE`. It is never "damage happened during packing".
+
+**Persistence and resolution:** every later inspected stage gets a status for D:
+
+* `PERSISTING`: still there.
+* `RESOLVED`: inspected and no longer observed. This could be a repack, a replaced item or a missed detection.
+* `UNCERTAIN`: a REVIEW stage, or a possible re-classification.
+
+A defect first seen at RECEIVING is `PRE_EXISTING`. A later stage that still shows it (for example PACKING)
+reports `current_stage_attribution: NOT_SUPPORTED`, so that stage is not blamed merely because the defect was
+observed there.
+
+### Evidence level (deterministic; not a probability, not model confidence)
+
+| Classification | Evidence | Rule |
+|---|---|---|
+| NEW_DEFECT | **HIGH** | previous stage explicitly PASSED **and** first observation confirmed (FAIL decision or operator) |
+| NEW_DEFECT | **MEDIUM** | exactly one of those two holds (e.g. previous stage FAILED for another defect, or D first seen only in a REVIEW) |
+| NEW_DEFECT | **LOW** | neither holds → `REQUIRES_REVIEW` |
+| PRE_EXISTING | HIGH / MEDIUM | receiving observation confirmed / unconfirmed |
+| UNCERTAIN | LOW | always requires review |
+| INSUFFICIENT_EVIDENCE | INSUFFICIENT | |
+
+Every result also returns `evidence_checks`: previous stage inspected / passed / not REVIEW, no missing stages,
+identity unambiguous, timestamps consistent, first observation confirmed.
+
+**Attribution:**
+
+* NEW_DEFECT with HIGH or MEDIUM evidence → `ATTRIBUTED` to the first observed stage.
+* PRE_EXISTING → `NOT_ATTRIBUTED`, because it was present before any dark-store stage.
+* INSUFFICIENT_EVIDENCE → `INSUFFICIENT_EVIDENCE`.
+* UNCERTAIN, or NEW_DEFECT with LOW evidence → `REQUIRES_REVIEW`.
+
+### Determinism, duplicates, ordering
+
+* Observations are sorted by (stage order, timestamp, inspection id), so input order never matters.
+* Duplicates are dropped and counted (`duplicates_ignored`), never double-counted. A duplicate is the same
+  inspection twice, or the same photo (content hash) uploaded twice; the earliest is kept.
+* Several inspections of the same stage are merged conservatively: FAIL beats REVIEW beats PASS, and the defects
+  are combined.
+* If an earlier stage was photographed after a later one, the result is `TIMESTAMP_ORDER_CONFLICT` and every
+  attribution becomes UNCERTAIN.
+* Complexity is O(N log N) for N observations, with at most 6 stages per defect type.
+
+### Integration and API
+
+* **In the pipeline:** the `PIPELINE_ANALYSIS` stage runs after a FAIL decision, a REVIEW decision, or when there
+  is no automated decision. The inspection service loads the trace's earlier observations into
+  `PipelineContext`; the analyzer itself never touches the DB. The snapshot is stored in
+  `inspection_results.pipeline_analysis`:
+  * `trace_analysis`: the full result.
+  * `suspected_stage`: set only when ATTRIBUTED.
+  * `evidence`: the explanation codes.
+  * `stage_likelihoods` and `confidence` stay empty on purpose.
+
+  A PASS decision skips the stage. The PASS observation still counts as evidence for later inspections.
+* **On demand:** `GET /api/inspections/{id}/pipeline` re-analyses the trace from persisted data, so operator
+  corrections apply immediately. It returns:
+  * the 6-stage `timeline`, with PASS / FAIL / REVIEW / NOT_OBSERVED for each stage;
+  * the ordered `observations`;
+  * one `defect_analyses` entry per defect type;
+  * `missing_stages`, `flags` and the disclaimer.
+
+  The response is scoped to the inspection's own store + SKU + item/order trace.
+* **New request field:** `POST /api/inspections` accepts `item_id`. `GET /api/inspections` gains `item_id` /
+  `order_id` filters. Migration `0002` adds the nullable, indexed `inspections.item_id` column. No analysis
+  table: results are reconstructed from existing data.
+* **UI:** the inspection panel shows the stage timeline and one card per defect: first observed, last known good,
+  stages not inspected, evidence, and whether the current stage is supported. It does not show root cause
+  (Part 5).
+
+```json
+{"defect_type": "CRUSHED_PACKAGE", "classification": "NEW_DEFECT", "attribution_status": "ATTRIBUTED",
+ "attributed_stage": "PACKING", "first_observed_stage": "PACKING", "last_known_good_stage": "PICKING",
+ "previous_inspected_stage": "PICKING", "missing_stages": [], "evidence_level": "HIGH",
+ "current_stage_attribution": "SUPPORTED", "explanation_code": "NEW_DEFECT_AFTER_GOOD_STAGE",
+ "stage_statuses": [{"stage": "RECEIVING", "status": "NOT_PRESENT"}, "…",
+                    {"stage": "DISPATCH", "status": "PERSISTING"}], "requires_review": false}
+```
+
+## GenAI Root-Cause Analysis (Part 4)
+
+> **GenAI explains the evidence and proposes likely contributing causes. It does not decide anything and does
+> not prove physical causality.** If the LLM is disabled or fails, every deterministic result still stands.
+
+1. **Computer vision** detects the defect (type, confidence, severity, box).
+2. **Rules** decide PASS / FAIL / REVIEW.
+3. **Pipeline intelligence** (Part 3) determines the first observed defect stage, the last known good stage, the
+   stages that were not inspected, and the evidence level.
+4. **GenAI** explains that evidence. It proposes *likely contributing causes*, corrective actions and verification
+   steps.
+5. GenAI does **not** prove physical causality.
+6. **Missing inspections reduce the evidence.** Uninspected stages are passed as `NOT_OBSERVED` and are never
+   called good.
+7. **REVIEW is not PASS.**
+8. **An LLM failure does not invalidate the deterministic inspection results.**
+
+### What the LLM is and isn't allowed to produce
+
+| Produced by deterministic code (never the LLM) | Produced by the LLM (labelled AI) |
+|---|---|
+| defect, confidence, severity, PASS/FAIL/REVIEW | `summary` |
+| first observed / last known good / previous stage, missing stages | `likely_causes[]`: category from a fixed taxonomy, hedged hypothesis, rationale, optional `related_stage` |
+| classification, evidence level, `requires_review` | `corrective_actions[]` (with priority) |
+| `observed_evidence[]` (fact sentences) and `limitations[]` | `verification_steps[]`, `ai_limitations[]` |
+
+The LLM's output schema has **no** fields for decisions, detections, stage attribution or numeric confidence, so
+it cannot supply them. Cause categories: `PACKAGING_MATERIAL`, `PACKAGING_PROCESS`, `SEALING_PROCESS`,
+`HANDLING`, `STORAGE_CONDITION`, `PICKING_HANDLING`, `TRANSPORT_HANDLING`, `LABELING`, `PRODUCT_CONDITION`,
+`UNKNOWN`. A category is never forced; `UNKNOWN` or no cause is allowed.
+
+### Flow
+
+```
+FulfillmentTraceAnalysis (Part 3, the only evidence source)
+   → RCAEvidence: timeline, observations, per-defect attribution, candidate_stages, untrusted operator notes
+   → prompt: static system prompt (rca-v1) + evidence JSON in <evidence> tags (data, not instructions)
+   → LLMProvider (anthropic | mock) → raw JSON text
+   → schema validation (Pydantic, sizes bounded) → grounding guardrails → RootCauseAnalysis
+```
+
+**Grounding guardrails** run on every response. Any violation discards the *whole* output (`INVALID_OUTPUT`):
+
+* exactly one finding per analysed defect type (no merging, no invented defects);
+* a cause's `related_stage` must lie in that defect's `candidate_stages`: after the last known good stage, up to
+  the first observed stage. A PRE_EXISTING defect only allows `RECEIVING`, so later stages can't be blamed;
+* hypotheses must be hedged ("likely / possible / may / could");
+* no "caused by", "root cause is", "proven" or "definitely";
+* no percentages or probabilities;
+* no SOP ids or "per company policy" (there is no SOP corpus until RAG);
+* no blaming people.
+
+**Prompt injection:** operator comments are passed only as `untrusted_operator_notes` inside the evidence JSON.
+`<` and `>` are escaped there, so a note cannot close the evidence block. The system prompt contains no request
+data and says never to follow instructions found in notes.
+
+### Fallback behaviour (never fails an inspection)
+
+| Situation | RCA `status` | Effect |
+|---|---|---|
+| No defect in the item's history | `NOT_APPLICABLE` | no LLM call |
+| `LLM_ENABLED=false`, no API key, SDK missing, timeout, rate limit, 4xx/5xx, network error, refusal, truncated output | `UNAVAILABLE` (`error_code` says which) | facts kept, AI fields empty, `requires_review=true` |
+| Malformed JSON, schema violation, oversized or ungrounded output | `INVALID_OUTPUT` | same as above, and the output is discarded |
+| Validated output | `COMPLETED` | facts plus AI hypotheses |
+
+In the pipeline, `RCA_PROCESSING` runs after `PIPELINE_ANALYSIS` for FAIL decisions. `ACTION_GENERATED`
+(`ACTION_ENGINE=rca`) turns the AI-suggested actions into an `ActionRecommendation`, without a second LLM call.
+The final state is:
+
+* `COMPLETED` for FAIL with actions and conclusive evidence;
+* `REQUIRES_REVIEW (ATTRIBUTION_REQUIRES_REVIEW)` when the stage evidence is insufficient or uncertain;
+* `REQUIRES_REVIEW (NO_CORRECTIVE_ACTION)` when the LLM was unavailable. The FAIL decision and the Part 3
+  analysis are kept.
+
+### Canonical example
+
+```
+Timeline   RECEIVING PASS · STORAGE PASS · PICKING PASS · PACKING FAIL · DISPATCH NOT_OBSERVED · DELIVERY NOT_OBSERVED
+CV         leakage, confidence 0.96, severity HIGH                → decision FAIL
+Pipeline   first observed PACKING · last known good PICKING · NEW_DEFECT · evidence HIGH
+GenAI RCA  (AI-generated, evidence-grounded)
+  Observed evidence (system facts): LEAKING_PACKAGE was first observed at PACKING. The last inspection that
+    explicitly passed was PICKING. CV detection at PACKING: confidence 0.96, severity HIGH.
+  Likely contributing causes (AI hypotheses): possible sealing-process issue [SEALING_PROCESS];
+    possible packaging-material damage [PACKAGING_MATERIAL]; possible excessive handling pressure [HANDLING]
+  Corrective actions: inspect sealing equipment; verify packaging-material condition; review packing handling
+    procedure; re-inspect affected inventory
+  Limitation: the pipeline analysis identifies the first observed stage where a defect appears based on
+    available inspection evidence. It does not prove physical causality.
+```
+
+The automated test `tests/cv/test_rca_full_path.py::test_canonical_demo_end_to_end` runs exactly this path with
+real YOLO inference, using the mock LLM so the run is deterministic and offline.
+
+### Provider and model
+
+* **Provider: Anthropic Claude**, via the official `anthropic` Python SDK (`pip install -e ".[llm]"`). The code
+  is written against `LLMProvider.generate_rca(prompt) → raw text`. Adding another vendor means one class plus
+  one line in `backend/rca/providers/__init__.py`. No other provider is implemented, on purpose.
+* **Default model `claude-opus-5-5`**, run with `LLM_EFFORT=low` to keep latency down for a short structured
+  task. It is configurable with `LLM_MODEL`; `claude-sonnet-5-5` or `claude-haiku-5-5` are cheaper and faster.
+* **Structured output:** native JSON-schema structured output (`output_config.format`), with the `defect_type`
+  enum narrowed per request, then strict Pydantic validation.
+* **Refusal fallback:** `LLM_REFUSAL_FALLBACK=true` adds Anthropic's server-side fallback (`fallbacks: "default"`),
+  so a request declined by a safety classifier is retried on Anthropic's recommended model.
+* **No temperature:** `LLM_TEMPERATURE` is accepted but not sent, because the API rejects sampling parameters on
+  current models.
+* **Timeout:** `LLM_TIMEOUT_SECONDS` (default 30) with one SDK retry. External latency depends on the provider and
+  network; a real call was **not measured** here because no API key was available in the build environment.
+  Tests drive the real provider through the SDK against a simulated HTTP transport.
+* **`LLM_PROVIDER=mock`** is a deterministic template test double, labelled "mock (not AI)" in the API and UI. It
+  is refused when `ENVIRONMENT=production`.
+
+### API
+
+* `GET /api/inspections/{id}/rca` rebuilds the Part 3 analysis from persisted inspections and operator feedback,
+  builds the evidence, calls the LLM once, validates the output and returns `RootCauseAnalysis`. It is not cached
+  and needs **no new table**. The pipeline-time snapshot lives in the existing `inspection_results.rca` column.
+* `GET /api/health` → `llm: {enabled, provider, model, status: disabled|configured|not_configured|
+  dependencies_missing, effort, timeout_seconds, prompt_version}`. This is a static check: it never calls the
+  provider and never includes credentials.
+* **Logs** record inspection id, stage, RCA status, provider, model, latency, token counts and error code. They
+  never contain prompts, raw model output, API keys or images. The SDK's and HTTP client's debug loggers are
+  pinned to WARNING because they would dump request bodies.
+
+### UI
+
+After the fulfillment timeline, a **"GenAI RCA · AI-generated · evidence-grounded"** panel shows:
+
+* per defect: first observed stage, last known good stage and evidence level;
+* **Observed evidence (system facts)**, then **Likely contributing causes (AI hypotheses)**, **Corrective actions
+  (AI-suggested)**, **Verification steps** and **Limitations**, as visually distinct lists;
+* a provider/model line ("Deterministic MOCK provider (not AI)" for the mock);
+* when unavailable, the reason, and a button to regenerate via `GET /rca`.
+
 ## Local setup
 
 Requirements: Python 3.11+, and either PostgreSQL 14+ or nothing (SQLite fallback). Docker is optional.
@@ -550,7 +833,14 @@ End-to-end smoke test against a running server: `scripts/smoke_test.sh http://lo
 | `ALLOWED_IMAGE_TYPES` | `jpeg,png,webp` | Accepted formats (checked against decoded content) |
 | `MAX_IMAGE_PIXELS` | `40000000` | Decompression-bomb guard |
 | `QUALITY_GATE_ENGINE` / `CV_ENGINE` / `DECISION_ENGINE` | `stub` | `basic` / `yolov8` / `rules` enable the Part 2 modules |
-| `PIPELINE_ANALYSIS_ENGINE`, `RCA_ENGINE`, `ACTION_ENGINE` | `stub` | Only `stub` exists (Parts 4–5) |
+| `PIPELINE_ANALYSIS_ENGINE` | `stub` | `deterministic` enables fulfillment stage attribution (Part 3) |
+| `RCA_ENGINE` / `ACTION_ENGINE` | `stub` | `genai` / `rca` enable GenAI RCA and RCA-derived actions (Part 4) |
+| `LLM_ENABLED` | `false` | Turn the LLM on; everything deterministic works without it |
+| `LLM_PROVIDER` / `LLM_MODEL` | `anthropic` / `claude-opus-5-5` | `mock` = deterministic test double (refused in production) |
+| `LLM_API_KEY` | *(empty)* | Falls back to `ANTHROPIC_API_KEY`; never logged, never returned |
+| `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` / `LLM_EFFORT` | `8000` / `30` / `low` | Output budget (incl. thinking), request timeout, effort level |
+| `LLM_REFUSAL_FALLBACK` | `true` | Anthropic server-side fallback on safety-classifier refusals |
+| `LLM_TEMPERATURE` | *(unset)* | Accepted but not sent (the API rejects sampling parameters) |
 | `CV_MODEL_PATH` | `artifacts/cv/qgenai-yolov8n-synthetic-v1/model/best.pt` | Model weights |
 | `CV_MODEL_VERSION` | *(from metadata.json)* | Version override |
 | `CV_DEVICE` | `auto` | `auto` / `cpu` / `cuda` / `cuda:N` (an unavailable CUDA device is an error, not a fallback) |
@@ -576,6 +866,8 @@ All endpoints are under `/api`. Interactive docs with request/response/error sch
 | POST | `/api/inspections` | Create inspection → `CREATED` |
 | GET | `/api/inspections` | List (filters: `store_id`, `sku_id`, `stage`, `status`; `limit`, `offset`) |
 | GET | `/api/inspections/{id}` | Inspection + module results + pipeline history |
+| GET | `/api/inspections/{id}/pipeline` | Fulfillment history of the item/order: stage timeline + first-defect attribution |
+| GET | `/api/inspections/{id}/rca` | GenAI RCA grounded in that evidence (facts + labelled AI hypotheses; safe fallback) |
 | POST | `/api/inspections/{id}/image` | Upload image (multipart `file`) → validate, store, run pipeline |
 | POST | `/api/inspections/{id}/feedback` | Operator verdict/corrections (resolves `REQUIRES_REVIEW`) |
 
@@ -635,25 +927,57 @@ Alembic migrations, and a full persisted lifecycle.
 * one test that needs the **trained demo artifact** (skipped if it hasn't been trained): it checks that the
   model finds the labelled defect class in ≥ 80% of held-out *synthetic* defect images.
 
+**Fulfillment tests** (`tests/fulfillment/`, plus `tests/cv/test_fulfillment_full_path.py`) cover:
+* the pure analyzer: all 10 required scenarios (all PASS, new defect, pre-existing, missing stages, REVIEW
+  predecessor, multiple defect types, resolved defect, out-of-order timestamps, other items, duplicates),
+  evidence rules, input-order independence and a 20,000-observation scaling check.
+* observation precedence: operator over decision over no-decision (which becomes REVIEW).
+* the API on persisted data: traces by item / order / none, in-flight exclusion, pipeline-stage snapshot,
+  health, validation.
+* the full path with **real CV inference**: image → YOLO → rules → persisted observation → attribution.
+
+**GenAI RCA tests** (`tests/rca/`, plus `tests/cv/test_rca_full_path.py`; no live API, no API key) cover:
+* the real Anthropic provider via the SDK against a simulated HTTP transport: request shape (structured output,
+  effort, fallback, no temperature), every failure class (timeout, network, 401/403/400/404/429/500/529, refusal,
+  truncation, missing key, missing SDK), and no key or prompt in logs;
+* RCA per Part 3 scenario: new defect, pre-existing, missing stages, REVIEW predecessor, multiple defects,
+  insufficient observations, no defect, operator override;
+* grounding: exactly the supplied observations reach the LLM, NOT_OBSERVED and REVIEW are kept as they are,
+  prompt-injection delimiting, and every guardrail violation rejected with the facts kept;
+* API and health (including secret safety);
+* pipeline routing: COMPLETED, ATTRIBUTION_REQUIRES_REVIEW, LLM unavailable;
+* the canonical demo end to end with real YOLO inference.
+
 ## Roadmap
 
 | Part | Scope | Status |
 |---|---|---|
 | 1 | Foundation + pipeline architecture | ✅ |
-| **2** | Computer Vision (YOLOv8 `CVEngine`, basic quality gate, decision rules, dataset/training/eval tooling) | ✅ this commit (demo model: synthetic data only) |
-| 3 | Image Quality Gate, advanced (glare, framing/occlusion, product-in-frame, retake UX) | planned |
-| 4 | Fulfillment Intelligence (where in the flow damage happened, stage analytics) | planned |
-| 5 | GenAI RCA + RAG (SOP retrieval, grounded root cause, corrective actions) | planned |
+| 2 | Computer Vision (YOLOv8 `CVEngine`, basic quality gate, decision rules, dataset/training/eval tooling) | ✅ (demo model: synthetic data only) |
+| 3 | Fulfillment Pipeline Intelligence (stage history, first-defect attribution, evidence levels) | ✅ |
+| **4** | GenAI Root-Cause Analysis (grounded hypotheses, corrective actions, safe fallback) | ✅ this commit |
+| 5 | RAG / SOP knowledge base (retrieve approved SOPs to ground corrective actions) | planned |
 | 6 | Active Learning (feedback review → labelled data → retraining → model versions) | planned |
 | 7 | Minimal security + production hardening (operator auth/roles, async workers, object storage) | planned |
+| later | Image Quality Gate, advanced (glare, framing/occlusion, product-in-frame, retake UX) | planned |
 
 ## Known limitations
 
 * **No real-world model.** The only trained model learned from synthetic cartoon scenes. Expect it to perform
   poorly on real photos until it is retrained on a real annotated dataset. Its metrics are demo metrics.
 * 5 of 10 taxonomy classes have no data at all (`placeholder`), and `wrong_item` needs SKU reference matching.
-* Fulfillment analysis, RCA and corrective actions are still placeholders. A FAIL decision therefore ends in
-  `REQUIRES_REVIEW` (`NO_CORRECTIVE_ACTION`), and inspections without a real decision go to human review.
+* GenAI RCA:
+  * produces hypotheses only, and has no SOP / policy knowledge (RAG is Part 5);
+  * the guardrails are pattern-based and can be over-strict (a valid but differently worded answer is discarded)
+    or miss creative wording, so a human must still review AI suggestions;
+  * each `GET /rca` makes a synchronous LLM call with no caching or rate limiting;
+  * no live LLM call was made during development, because no API key was available. The provider is tested
+    against simulated HTTP responses, and real-model output quality and latency are unmeasured.
+* Stage attribution is only as good as the inspections that exist:
+  * it needs an `item_id` (or `order_id`) to link stages;
+  * defect identity is the defect *type*, with no visual re-identification of the same physical defect;
+  * a "resolved" defect may simply be a missed detection.
+  It reports the first *observed* stage, never a proven cause.
 * Inference runs synchronously inside the upload request, one image at a time per process (the model is guarded
   by a lock). That's fine for a demo, but production needs a worker queue (Part 7). The orchestrator is already
   HTTP-independent.

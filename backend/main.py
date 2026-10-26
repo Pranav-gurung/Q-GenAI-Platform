@@ -20,6 +20,7 @@ from backend.db.session import build_engine, build_session_factory
 from backend.pipeline.orchestrator import PipelineOrchestrator
 from backend.pipeline.registry import build_modules
 from backend.pipeline.states import PipelineState
+from backend.rca.service import RCAService
 from backend.services.reference_service import is_empty, seed_sample_data
 from backend.services.storage import build_storage
 
@@ -30,9 +31,10 @@ API_DESCRIPTION = f"""
 Computer-vision-first quality inspection pipeline for quick-commerce dark stores.
 
 **Modules** are selected by configuration (see `GET /api/health` for what is active and whether it can run):
-image quality gate (`basic`), computer vision (`yolov8`), decision rules (`rules`). Fulfillment analysis,
-RCA and corrective actions are placeholders that report `NOT_IMPLEMENTED`. CV reports visual evidence;
-PASS/FAIL/REVIEW comes from deterministic rules. Inspections without a real decision end in `REQUIRES_REVIEW`.
+image quality gate (`basic`), computer vision (`yolov8`), decision rules (`rules`), fulfillment stage
+analysis (`deterministic`), GenAI root-cause analysis (`genai`) and RCA-derived actions (`rca`). CV reports visual
+evidence; PASS/FAIL/REVIEW comes from deterministic rules; stage attribution is deterministic; the LLM only adds
+labelled hypotheses. Inspections without a real decision end in `REQUIRES_REVIEW`.
 
 **Pipeline states:** {", ".join(s.value for s in PipelineState)}
 
@@ -67,6 +69,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.session_factory = build_session_factory(app.state.engine)
     app.state.storage = build_storage(settings)
     app.state.orchestrator = PipelineOrchestrator(build_modules(settings))
+    rca_engine = app.state.orchestrator.modules.rca_engine
+    app.state.rca_service = getattr(rca_engine, "service", None) or RCAService(settings)  # shared by GET /rca
 
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=False,
                        allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-API-Key", "X-Request-ID"])

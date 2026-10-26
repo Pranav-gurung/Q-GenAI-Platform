@@ -34,6 +34,10 @@ dev = [
 cv = [
     "ultralytics==8.4.190",
 ]
+# GenAI root-cause analysis with LLM_PROVIDER=anthropic (Part 4)
+llm = [
+    "anthropic>=2.3",
+]
 # Optional ONNX export (python -m ml.cv.export)
 cv-export = [
     "onnx>=1.16",

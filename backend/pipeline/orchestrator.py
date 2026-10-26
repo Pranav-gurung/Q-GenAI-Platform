@@ -6,8 +6,11 @@
 Routing rules (all based on REAL results only):
   * quality gate says image not acceptable        -> REQUIRES_REVIEW (IMAGE_QUALITY_REJECTED)
   * decision PASS                                 -> COMPLETED (no RCA / action needed)
-  * decision REVIEW                               -> REQUIRES_REVIEW (DECISION_REVIEW)
-  * decision FAIL and a corrective action exists  -> COMPLETED
+  * decision REVIEW                               -> PIPELINE_ANALYSIS (stage history for the reviewer), then
+                                                     REQUIRES_REVIEW (DECISION_REVIEW); no RCA / action
+  * decision FAIL and a corrective action exists  -> COMPLETED, unless the RCA says the stage evidence needs review
+                                                     (insufficient / uncertain attribution) -> REQUIRES_REVIEW
+                                                     (ATTRIBUTION_REQUIRES_REVIEW)
   * no real decision (e.g. modules not implemented yet) -> REQUIRES_REVIEW (NO_AUTOMATED_DECISION):
     the system never auto-passes or auto-fails a product it could not actually inspect.
   * a module raises / violates its contract       -> FAILED (MODULE_ERROR / MODULE_CONTRACT_VIOLATION)
@@ -66,12 +69,12 @@ class PipelineOrchestrator:
                                    lambda: m.decision_engine.decide(ctx.cv, ctx.inspection))
             if decision.is_real and decision.outcome is DecisionOutcome.PASS:
                 return self._finish(ctx, S.COMPLETED, started, message="Decision PASS")
+            self._stage(ctx, S.PIPELINE_ANALYSIS, "pipeline_analysis", m.pipeline_analyzer, PipelineAnalysis,
+                        lambda: m.pipeline_analyzer.analyze(ctx))
             if decision.is_real and decision.outcome is DecisionOutcome.REVIEW:
                 return self._finish(ctx, S.REQUIRES_REVIEW, started, "DECISION_REVIEW",
                                     decision.reason or "Decision engine requested human review")
 
-            self._stage(ctx, S.PIPELINE_ANALYSIS, "pipeline_analysis", m.pipeline_analyzer, PipelineAnalysis,
-                        lambda: m.pipeline_analyzer.analyze(ctx))
             self._stage(ctx, S.RCA_PROCESSING, "rca", m.rca_engine, RCAResult, lambda: m.rca_engine.analyze(ctx))
             action = self._stage(ctx, S.ACTION_GENERATED, "action", m.action_engine, ActionRecommendation,
                                  lambda: m.action_engine.recommend(ctx.rca, ctx))
@@ -82,6 +85,10 @@ class PipelineOrchestrator:
             if not action.is_real:
                 return self._finish(ctx, S.REQUIRES_REVIEW, started, "NO_CORRECTIVE_ACTION",
                                     "Defect confirmed but no corrective action generated; operator review required")
+            rca = ctx.rca.root_cause_analysis if ctx.rca is not None and ctx.rca.is_real else None
+            if rca is not None and rca.requires_review:
+                return self._finish(ctx, S.REQUIRES_REVIEW, started, "ATTRIBUTION_REQUIRES_REVIEW",
+                                    "Corrective actions suggested, but stage attribution evidence requires review")
             return self._finish(ctx, S.COMPLETED, started, message="Decision FAIL with corrective action")
         except _StageFailed as exc:
             ctx.record_error(exc.code, exc.message)

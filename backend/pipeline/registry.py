@@ -50,9 +50,25 @@ def _rules_decision(settings: Settings) -> PipelineModule:
 QUALITY_GATES: dict[str, Factory] = {"stub": lambda s: stubs.StubImageQualityGate(), "basic": _basic_quality_gate}
 CV_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubCVEngine(), "yolov8": _yolov8_engine}
 DECISION_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubDecisionEngine(), "rules": _rules_decision}
-PIPELINE_ANALYZERS: dict[str, Factory] = {"stub": lambda s: stubs.StubPipelineAnalyzer()}
-RCA_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubRCAEngine()}
-ACTION_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubActionEngine()}
+def _deterministic_analyzer(settings: Settings) -> PipelineModule:
+    from backend.fulfillment.engine import DeterministicPipelineAnalyzer
+    return DeterministicPipelineAnalyzer()
+
+
+PIPELINE_ANALYZERS: dict[str, Factory] = {"stub": lambda s: stubs.StubPipelineAnalyzer(),
+                                          "deterministic": _deterministic_analyzer}
+def _genai_rca(settings: Settings) -> PipelineModule:
+    from backend.rca.engine import GenAIRCAEngine  # vendor SDK imported only if the LLM is enabled
+    return GenAIRCAEngine(settings)
+
+
+def _rca_actions(settings: Settings) -> PipelineModule:
+    from backend.rca.engine import RCAActionEngine
+    return RCAActionEngine()
+
+
+RCA_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubRCAEngine(), "genai": _genai_rca}
+ACTION_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubActionEngine(), "rca": _rca_actions}
 
 
 def _pick(registry: dict[str, Factory], key: str, setting: str, settings: Settings) -> PipelineModule:

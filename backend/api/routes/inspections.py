@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, File, Path, Query, UploadFile, status
+from fastapi import APIRouter, Depends, File, Path, Query, Request, UploadFile, status
 
 from backend.api.dependencies import (get_feedback_service, get_inspection_service, get_settings_dep,
                                       require_api_key)
@@ -17,6 +17,10 @@ from backend.schemas.feedback import FeedbackCreate, FeedbackRecord
 from backend.schemas.inspection import InspectionCreate, InspectionDetail, InspectionEvent
 from backend.services.feedback_service import FeedbackService
 from backend.services.inspection_service import InspectionFilters, InspectionService
+from backend.schemas.fulfillment import FulfillmentTraceAnalysis
+from backend.schemas.rca import RootCauseAnalysis
+from backend.services.rca_service import generate_inspection_rca
+from backend.services.fulfillment_service import analyze_inspection_trace
 from backend.services.mappers import feedback_to_schema, inspection_to_detail, inspection_to_event
 
 router = APIRouter(prefix="/inspections", tags=["inspections"], responses=ERROR_RESPONSES)
@@ -36,12 +40,16 @@ def list_inspections(
     service: Service,
     store_id: Annotated[str | None, Query(pattern=ID_PATTERN)] = None,
     sku_id: Annotated[str | None, Query(pattern=ID_PATTERN)] = None,
+    order_id: Annotated[str | None, Query(pattern=ID_PATTERN)] = None,
+    item_id: Annotated[str | None, Query(pattern=ID_PATTERN)] = None,
     stage: FulfillmentStage | None = None,
     status_: Annotated[PipelineState | None, Query(alias="status")] = None,
     limit: Annotated[int, Query(ge=1, le=100)] = 20,
     offset: Annotated[int, Query(ge=0)] = 0,
 ) -> Page[InspectionEvent]:
-    items, total = service.list(InspectionFilters(store_id, sku_id, stage, status_), limit, offset)
+    filters = InspectionFilters(store_id=store_id, sku_id=sku_id, order_id=order_id, item_id=item_id, stage=stage,
+                                status=status_)
+    items, total = service.list(filters, limit, offset)
     return Page(items=[inspection_to_event(i) for i in items], total=total, limit=limit, offset=offset)
 
 
@@ -49,6 +57,28 @@ def list_inspections(
             summary="Inspection with module results and pipeline history")
 def get_inspection(inspection_id: InspectionIdPath, service: Service) -> InspectionDetail:
     return inspection_to_detail(service.get(inspection_id))
+
+
+@router.get("/{inspection_id}/pipeline", response_model=FulfillmentTraceAnalysis,
+            summary="Fulfillment history of this inspection's item/order, with first-defect stage attribution",
+            description="Observations of the same store + SKU + item_id (or order_id when there is no item_id), ordered "
+                        "by fulfillment stage, analysed deterministically on request from persisted results and operator "
+                        "feedback. Identifies the first OBSERVED stage of each defect; it does not prove physical "
+                        "causality. Uninspected stages are reported as NOT_OBSERVED, never assumed good.")
+def get_inspection_pipeline(inspection_id: InspectionIdPath, service: Service) -> FulfillmentTraceAnalysis:
+    return analyze_inspection_trace(service.session, service.get(inspection_id))
+
+
+@router.get("/{inspection_id}/rca", response_model=RootCauseAnalysis,
+            summary="GenAI root-cause analysis, grounded in the fulfillment pipeline evidence",
+            description="Rebuilds the deterministic Part 3 analysis from persisted inspections and operator feedback, "
+                        "then asks the configured LLM for HYPOTHESES (likely contributing causes, corrective actions, "
+                        "verification steps). Facts and observed evidence are produced by code, not the LLM. Never "
+                        "fails because of the LLM: when it is disabled, unavailable or returns invalid/ungrounded "
+                        "output, status is UNAVAILABLE / INVALID_OUTPUT, the facts are still returned and "
+                        "requires_review is true. Each call may make one synchronous LLM request.")
+def get_inspection_rca(inspection_id: InspectionIdPath, service: Service, request: Request) -> RootCauseAnalysis:
+    return generate_inspection_rca(service.session, service.get(inspection_id), request.app.state.rca_service)
 
 
 @router.post("/{inspection_id}/image", response_model=InspectionDetail, dependencies=[Depends(require_api_key)],
