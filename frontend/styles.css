@@ -42,4 +42,10 @@ th { color: var(--muted); font-weight: 500; }
 .defect-card { border: 1px solid var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 8px; font-size: .9rem; }
 .defect-card dl { grid-template-columns: max-content 1fr; }
 .disclaimer { font-size: .8rem; }
+.ai-badge { font-size: .72rem; font-weight: 600; padding: 1px 6px; border-radius: 8px; border: 1px dashed var(--warn); color: var(--warn); margin-left: 6px; vertical-align: middle; }
+.rca-block { border: 1px dashed var(--border); border-radius: 6px; padding: 8px 10px; margin-bottom: 10px; font-size: .9rem; }
+.rca-block h4 { margin: 8px 0 4px; font-size: .82rem; color: var(--muted); text-transform: uppercase; letter-spacing: .03em; }
+.rca-block ul { margin: 0; padding-left: 18px; } .rca-block li { margin-bottom: 3px; }
+.rca-facts li { list-style: square; } .rca-ai li::marker { content: "◇ "; }
+button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); margin-bottom: 8px; }
 #r-stages { padding-left: 20px; margin: 0; } #r-stages li { margin-bottom: 4px; } #r-stages small { color: var(--muted); display: block; }

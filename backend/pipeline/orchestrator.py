@@ -8,7 +8,9 @@ Routing rules (all based on REAL results only):
   * decision PASS                                 -> COMPLETED (no RCA / action needed)
   * decision REVIEW                               -> PIPELINE_ANALYSIS (stage history for the reviewer), then
                                                      REQUIRES_REVIEW (DECISION_REVIEW); no RCA / action
-  * decision FAIL and a corrective action exists  -> COMPLETED
+  * decision FAIL and a corrective action exists  -> COMPLETED, unless the RCA says the stage evidence needs review
+                                                     (insufficient / uncertain attribution) -> REQUIRES_REVIEW
+                                                     (ATTRIBUTION_REQUIRES_REVIEW)
   * no real decision (e.g. modules not implemented yet) -> REQUIRES_REVIEW (NO_AUTOMATED_DECISION):
     the system never auto-passes or auto-fails a product it could not actually inspect.
   * a module raises / violates its contract       -> FAILED (MODULE_ERROR / MODULE_CONTRACT_VIOLATION)
@@ -83,6 +85,10 @@ class PipelineOrchestrator:
             if not action.is_real:
                 return self._finish(ctx, S.REQUIRES_REVIEW, started, "NO_CORRECTIVE_ACTION",
                                     "Defect confirmed but no corrective action generated; operator review required")
+            rca = ctx.rca.root_cause_analysis if ctx.rca is not None and ctx.rca.is_real else None
+            if rca is not None and rca.requires_review:
+                return self._finish(ctx, S.REQUIRES_REVIEW, started, "ATTRIBUTION_REQUIRES_REVIEW",
+                                    "Corrective actions suggested, but stage attribution evidence requires review")
             return self._finish(ctx, S.COMPLETED, started, message="Decision FAIL with corrective action")
         except _StageFailed as exc:
             ctx.record_error(exc.code, exc.message)

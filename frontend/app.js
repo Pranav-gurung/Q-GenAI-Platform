@@ -116,6 +116,56 @@ function renderFulfillment(trace) {
   }));
 }
 
+function listBlock(title, items, cls, fmt = (x) => x) {
+  const wrap = document.createElement("div");
+  if (!items.length) return wrap;
+  const h = document.createElement("h4"); h.textContent = title;
+  const ul = document.createElement("ul"); if (cls) ul.className = cls;
+  for (const it of items) { const li = document.createElement("li"); li.textContent = fmt(it); ul.append(li); }
+  wrap.append(h, ul);
+  return wrap;
+}
+
+// RCA: system facts (deterministic) and AI hypotheses are rendered in separate, labelled lists.
+function renderRCA(rca, inspectionId) {
+  const box = document.getElementById("r-rca");
+  const btn = document.getElementById("r-rca-generate");
+  box.hidden = false;
+  btn.hidden = false;
+  btn.textContent = rca && rca.status === "COMPLETED" ? "Regenerate GenAI RCA" : "Generate GenAI RCA";
+  btn.onclick = async () => {
+    btn.disabled = true;
+    try { renderRCA(await api(`/inspections/${inspectionId}/rca`), inspectionId); }
+    catch (err) { showError(err.message); } finally { btn.disabled = false; }
+  };
+  const meta = document.getElementById("r-rca-meta");
+  const defects = document.getElementById("r-rca-defects");
+  defects.replaceChildren();
+  document.getElementById("r-rca-summary").textContent = rca?.summary ?? "";
+  document.getElementById("r-rca-disclaimer").textContent = rca?.disclaimer ?? "";
+  if (!rca) { meta.textContent = "No RCA was generated during this inspection."; return; }
+  const g = rca.generation;
+  meta.textContent = rca.status === "COMPLETED"
+    ? `${g.provider === "mock" ? "Deterministic MOCK provider (not AI)" : g.provider + " / " + g.model} · ` +
+      `${g.latency_ms != null ? Math.round(g.latency_ms) + " ms" : ""}${rca.requires_review ? " · requires review" : ""}`
+    : rca.status === "NOT_APPLICABLE" ? "No defect in this item's history: nothing to explain."
+    : `GenAI RCA ${rca.status.toLowerCase().replace("_", " ")} (${g.error_code}). Deterministic results above are ` +
+      "unaffected; the inspection requires human review.";
+  for (const d of rca.defects) {
+    const card = document.createElement("div"); card.className = "rca-block";
+    const h = document.createElement("strong");
+    h.textContent = `${d.defect_type} · first observed ${d.facts.first_observed_stage} · last known good ` +
+      `${d.facts.last_known_good_stage ?? "none"} · evidence ${d.facts.evidence_level}`;
+    card.append(h,
+      listBlock("Observed evidence (system facts)", d.observed_evidence, "rca-facts"),
+      listBlock("Likely contributing causes (AI hypotheses)", d.likely_causes, "rca-ai", c => `${c.hypothesis} [${c.category}]`),
+      listBlock("Corrective actions (AI-suggested)", d.corrective_actions, "rca-ai", a => `${a.action} (${a.priority})`),
+      listBlock("Verification steps (AI-suggested)", d.verification_steps, "rca-ai"),
+      listBlock("Limitations", [...d.limitations, ...d.ai_limitations], "rca-facts"));
+    defects.append(card);
+  }
+}
+
 function render(insp, file) {
   document.getElementById("result").hidden = false;
   document.getElementById("r-id").textContent = insp.inspection_id;
@@ -159,10 +209,15 @@ form.addEventListener("submit", async (e) => {
     const created = await api("/inspections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     render(created);
     renderFulfillment(null);
+    document.getElementById("r-rca").hidden = true;
     const data = new FormData();
     data.append("file", form.image.files[0]);
     render(await api(`/inspections/${created.inspection_id}/image`, { method: "POST", body: data }), form.image.files[0]);
     renderFulfillment(await api(`/inspections/${created.inspection_id}/pipeline`));
+    const done = await api(`/inspections/${created.inspection_id}`);
+    const snap = done.result?.rca;
+    renderRCA(snap?.root_cause_analysis ?? (snap ? { status: snap.status === "UNAVAILABLE" ? "UNAVAILABLE" : "NOT_APPLICABLE",
+      defects: [], generation: { error_code: (snap.message || "").split(":")[0] } } : null), created.inspection_id);
   } catch (err) {
     showError(err.message);
   } finally {

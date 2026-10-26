@@ -9,7 +9,7 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Annotated
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, SecretStr, field_validator, model_validator
 from pydantic_settings import BaseSettings, NoDecode, SettingsConfigDict
 
 
@@ -52,8 +52,20 @@ class Settings(BaseSettings):
     cv_engine: str = "stub"               # stub | yolov8
     decision_engine: str = "stub"         # stub | rules
     pipeline_analysis_engine: str = "stub"  # stub | deterministic
-    rca_engine: str = "stub"
-    action_engine: str = "stub"
+    rca_engine: str = "stub"     # stub | genai
+    action_engine: str = "stub"  # stub | rca  (corrective actions taken from the GenAI RCA)
+
+    # GenAI root-cause analysis (RCA_ENGINE=genai, GET /api/inspections/{id}/rca). Off by default; the app starts
+    # and every deterministic result works without it.
+    llm_enabled: bool = False
+    llm_provider: str = Field("anthropic", pattern="^(anthropic|mock)$")  # mock: deterministic test double, non-prod
+    llm_model: str = "claude-opus-5-5"
+    llm_api_key: SecretStr | None = None   # falls back to ANTHROPIC_API_KEY; never logged or returned
+    llm_temperature: float | None = Field(None, ge=0, le=1)  # NOT sent to Anthropic: the API rejects sampling params
+    llm_max_tokens: int = Field(8000, ge=512, le=64000)      # includes the model's (adaptive) thinking tokens
+    llm_timeout_seconds: float = Field(30.0, gt=0, le=300)
+    llm_effort: str = Field("low", pattern="^(low|medium|high|xhigh|max)$")
+    llm_refusal_fallback: bool = True     # Anthropic server-side fallback when a safety classifier declines
 
     # Computer vision (used when CV_ENGINE=yolov8; see ml/cv/ and README "Computer Vision")
     cv_model_path: Path = Path("artifacts/cv/qgenai-yolov8n-synthetic-v1/model/best.pt")
@@ -97,7 +109,7 @@ class Settings(BaseSettings):
             raise ValueError(f"unsupported image types {sorted(unknown)}; supported: {sorted(supported)}")
         return out
 
-    @field_validator("api_key", mode="before")
+    @field_validator("api_key", "llm_api_key", mode="before")
     @classmethod
     def _empty_key_is_none(cls, v: object) -> object:
         return v or None
@@ -115,6 +127,8 @@ class Settings(BaseSettings):
                 raise ValueError("CORS_ORIGINS='*' is not allowed in production")
             if self.database_url.startswith("sqlite"):
                 raise ValueError("SQLite is for development/tests only; set a PostgreSQL DATABASE_URL")
+            if self.llm_enabled and self.llm_provider == "mock":
+                raise ValueError("LLM_PROVIDER=mock is a test double and is not allowed in production")
         return self
 
     @property

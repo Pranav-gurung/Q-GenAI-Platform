@@ -15,6 +15,9 @@ class HealthResponse(BaseModel):
     environment: str
     database: str  # ok | unavailable
     storage: str   # ok | unavailable
+    llm: dict = Field(description="GenAI RCA configuration: enabled, provider, model, status "
+                                  "(disabled | configured | not_configured). Static check: the provider is not called, "
+                                  "and no credentials are ever included.")
     pipeline_modules: dict[str, dict] = Field(description=(
         "Per slot: name, implemented, and for artifact-backed modules (CV) also available, model_loaded, "
         "model_version, device, error. A configured module that cannot run makes status 'degraded'."))
@@ -31,5 +34,6 @@ def health(request: Request) -> HealthResponse:
         status="ok" if db_ok and storage_ok and modules_ok else "degraded",
         version=__version__, environment=state.settings.environment.value,
         database="ok" if db_ok else "unavailable", storage="ok" if storage_ok else "unavailable",
+        llm=state.rca_service.health(),
         pipeline_modules=modules,
     )

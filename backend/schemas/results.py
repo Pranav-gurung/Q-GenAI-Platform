@@ -17,6 +17,7 @@ from backend.domain.enums import (ActionPriority, DecisionOutcome, DecisionSourc
                                   ModuleStatus, Severity)
 from backend.domain.fulfillment import FulfillmentStage
 from backend.schemas.fulfillment import FulfillmentTraceAnalysis
+from backend.schemas.rca import RootCauseAnalysis
 
 Confidence = float  # constrained per-field with ge=0, le=1
 
@@ -183,17 +184,21 @@ class PipelineAnalysis(ModuleResult):
 class RootCause(BaseModel):
     model_config = ConfigDict(extra="forbid")
     cause: str = Field(max_length=500)
-    confidence: float = Field(ge=0, le=1)
+    # Optional since Part 4: a GenAI hypothesis has no calibrated confidence and must not be given an invented one.
+    confidence: float | None = Field(None, ge=0, le=1)
     evidence: list[str] = Field(default_factory=list)
     stage: FulfillmentStage | None = None
 
 
 class RCAResult(ModuleResult):
-    payload_fields: ClassVar = ("possible_causes", "recommended_investigation", "confidence")
+    """GenAI implementation (Part 4): `root_cause_analysis` holds the structured, grounded result;
+    `possible_causes` / `recommended_investigation` mirror its hypotheses and checks. `confidence` stays empty."""
+    payload_fields: ClassVar = ("possible_causes", "recommended_investigation", "confidence", "root_cause_analysis")
 
     possible_causes: list[RootCause] = Field(default_factory=list)
     recommended_investigation: list[str] = Field(default_factory=list)
     confidence: float | None = Field(None, ge=0, le=1)
+    root_cause_analysis: RootCauseAnalysis | None = None
 
 
 # ---------------------------------------------------------------- corrective action (Part 5)
@@ -201,7 +206,7 @@ class CorrectiveAction(BaseModel):
     model_config = ConfigDict(extra="forbid")
     action: str = Field(max_length=200, examples=["Quarantine affected batch"])
     priority: ActionPriority
-    responsible_stage: FulfillmentStage
+    responsible_stage: FulfillmentStage | None = None  # optional since Part 4 (not every action belongs to a stage)
     instructions: list[str] = Field(default_factory=list)
     sop_reference: str | None = None
 

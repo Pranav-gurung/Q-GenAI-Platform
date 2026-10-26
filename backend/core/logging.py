@@ -22,6 +22,7 @@ STRUCTURED_FIELDS = ("inspection_id", "pipeline_stage", "status", "duration_ms",
                      "request_id", "method", "path", "status_code")
 
 PIPELINE_LOGGER = "qgenai.pipeline"
+QUIET_LOGGERS = ("anthropic", "httpx", "httpx2", "httpcore")
 
 
 class _RequestIdFilter(logging.Filter):
@@ -81,6 +82,9 @@ def configure_logging(level: str = "INFO", fmt: str = "console", stream=None) ->
     root.setLevel(level.upper())
     # uvicorn's access log duplicates our request log
     logging.getLogger("uvicorn.access").setLevel(logging.WARNING)
+    # Vendor HTTP / LLM SDK loggers dump full request bodies (prompts) and headers at DEBUG: never let them through.
+    for name in QUIET_LOGGERS:
+        logging.getLogger(name).setLevel(logging.WARNING)
 
 
 def log_pipeline(inspection_id: str, stage: str, status: str, *, level: int = logging.INFO,
