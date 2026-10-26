@@ -1,12 +1,27 @@
-# secrets / env
+# secrets / local env
 .env
+.env.*
+!.env.example
 *.key
 
-# generated data & indexes (re-creatable; may be large or licensed)
-data/
-documents/approved/*
-!documents/approved/README.md
+# runtime data (re-creatable; may be large or licensed)
+data/*
+!data/samples/
+!data/raw/
+!data/processed/
+!data/feedback/
+data/raw/*
+data/processed/*
+data/feedback/*
+!data/*/.gitkeep
+*.db
 *.sqlite3
+
+# model weights (added in Part 2, never committed) - root-level only; backend/db/models is code
+/models/
+*.pt
+*.onnx
+*.engine
 
 # python
 __pycache__/
@@ -15,3 +30,4 @@ __pycache__/
 .venv/
 venv/
 *.egg-info/
+build/
