@@ -11,6 +11,7 @@ PROTECTED = [
     ("get", "/auth/me"), ("post", "/auth/logout"), ("get", "/model-info"),
     ("get", "/inspections"), ("get", "/inspections/abc"), ("get", "/inspections/abc/report"),
     ("get", "/inspections/abc/annotated-image"), ("get", "/inspections/abc/rca-payload"),
+    ("get", "/inspections/abc/rca-request"),
     ("post", "/predict"), ("get", "/quality/policy"), ("put", "/quality/policy"),
     ("post", "/inspections/abc/override"), ("get", "/quality/review-queue"),
     ("get", "/quality/audit-logs"), ("get", "/admin/users"), ("post", "/admin/users"),

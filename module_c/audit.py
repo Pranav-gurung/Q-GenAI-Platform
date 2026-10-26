@@ -83,4 +83,11 @@ def make_audit_sink(s: Settings) -> AuditSink:
         return JsonlAuditSink(s.audit_path)
     if s.audit_sink == "none":
         return NullAuditSink()
+    if s.audit_sink == "module_d":
+        try:
+            from app.database import SessionLocal
+            from app.services.audit_adapter import ModuleDAuditAdapter
+            return ModuleDAuditAdapter(SessionLocal)
+        except ImportError as e:
+            raise AuditError(f"Cannot initialize module_d audit sink: {e}") from e
     raise ValueError(f"unknown RCA_AUDIT_SINK {s.audit_sink!r}")
