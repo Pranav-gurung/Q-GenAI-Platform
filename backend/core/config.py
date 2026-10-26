@@ -48,13 +48,37 @@ class Settings(BaseSettings):
     max_image_pixels: int = Field(40_000_000, gt=0)
 
     # Pipeline module selection (see backend/pipeline/registry.py)
-    quality_gate_engine: str = "stub"
-    cv_engine: str = "stub"
-    decision_engine: str = "stub"
+    quality_gate_engine: str = "stub"     # stub | basic
+    cv_engine: str = "stub"               # stub | yolov8
+    decision_engine: str = "stub"         # stub | rules
     pipeline_analysis_engine: str = "stub"
     rca_engine: str = "stub"
     action_engine: str = "stub"
-    model_path: Path = Path("models/")
+
+    # Computer vision (used when CV_ENGINE=yolov8; see ml/cv/ and README "Computer Vision")
+    cv_model_path: Path = Path("artifacts/cv/qgenai-yolov8n-synthetic-v1/model/best.pt")
+    cv_model_version: str | None = None   # override; default: artifact metadata.json, else content hash
+    cv_device: str = Field("auto", pattern=r"^(auto|cpu|cuda(:\d+)?)$")
+    cv_confidence_threshold: float = Field(0.35, ge=0, le=1)
+    cv_iou_threshold: float = Field(0.5, gt=0, le=1)
+    cv_image_size: int | None = Field(None, ge=32, le=2048)  # None: the size the model was trained at
+    cv_max_detections: int = Field(50, ge=1, le=1000)
+    cv_taxonomy_path: Path = Path("ml/cv/taxonomy.yaml")
+    # Severity: boxes covering >= this fraction of the image escalate severity by one level
+    cv_severity_large_area_ratio: float = Field(0.20, gt=0, le=1)
+
+    # Image quality gate (QUALITY_GATE_ENGINE=basic). Conservative: reject only unusable images.
+    cv_min_image_width: int = Field(128, ge=1)
+    cv_min_image_height: int = Field(128, ge=1)
+    cv_max_aspect_ratio: float = Field(6.0, ge=1)
+    cv_blur_threshold: float = Field(15.0, ge=0)        # variance of Laplacian (grayscale, long side 512)
+    cv_min_brightness: float = Field(20.0, ge=0, le=255)  # mean luminance 0-255
+    cv_max_brightness: float = Field(240.0, ge=0, le=255)
+
+    # Decision rules (DECISION_ENGINE=rules) - operational decision, not ML
+    decision_fail_min_severity: str = Field("HIGH", pattern="^(LOW|MEDIUM|HIGH|CRITICAL)$")
+    decision_fail_min_confidence: float = Field(0.5, ge=0, le=1)
+    decision_auto_pass: bool = False      # PASS when CV found nothing; off by default (limited model coverage)
 
     @field_validator("cors_origins", "allowed_image_types", mode="before")
     @classmethod
@@ -77,6 +101,12 @@ class Settings(BaseSettings):
     @classmethod
     def _empty_key_is_none(cls, v: object) -> object:
         return v or None
+
+    @model_validator(mode="after")
+    def _brightness_order(self) -> "Settings":
+        if self.cv_min_brightness >= self.cv_max_brightness:
+            raise ValueError("CV_MIN_BRIGHTNESS must be lower than CV_MAX_BRIGHTNESS")
+        return self
 
     @model_validator(mode="after")
     def _production_guards(self) -> "Settings":

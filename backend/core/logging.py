@@ -72,8 +72,8 @@ class ConsoleFormatter(logging.Formatter):
         return line
 
 
-def configure_logging(level: str = "INFO", fmt: str = "console") -> None:
-    handler = logging.StreamHandler(sys.stdout)
+def configure_logging(level: str = "INFO", fmt: str = "console", stream=None) -> None:
+    handler = logging.StreamHandler(stream or sys.stdout)
     handler.setFormatter(JsonFormatter() if fmt == "json" else ConsoleFormatter())
     handler.addFilter(_RequestIdFilter())
     root = logging.getLogger()

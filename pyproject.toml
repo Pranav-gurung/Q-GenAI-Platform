@@ -18,12 +18,25 @@ dependencies = [
     "psycopg[binary]>=3.1",
     "python-multipart>=0.0.9",
     "pillow>=10.3",
+    "numpy>=1.26",          # image quality gate, CV postprocessing
+    "pyyaml>=6.0",          # defect taxonomy / dataset definitions
 ]
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8.0",
     "httpx>=0.27",
+]
+# Real CV engine (CV_ENGINE=yolov8), training and evaluation. Pulls PyTorch.
+# CPU-only machines can install the smaller CPU wheel first:
+#   pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+# NOTE: Ultralytics is AGPL-3.0 licensed (see README "Licensing").
+cv = [
+    "ultralytics==8.4.190",
+]
+# Optional ONNX export (python -m ml.cv.export)
+cv-export = [
+    "onnx>=1.16",
 ]
 
 [tool.setuptools.packages.find]
@@ -32,3 +45,6 @@ include = ["backend*", "ml*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-ra"
+
+[tool.setuptools.package-data]
+"ml.cv" = ["taxonomy.yaml"]

@@ -10,11 +10,14 @@ class ModuleStatus(str, Enum):
     COMPLETED        the module produced a real result
     NOT_IMPLEMENTED  placeholder module; produced NO result (never fake values)
     SKIPPED          module intentionally not run (e.g. required upstream input missing)
+    UNAVAILABLE      a real module is configured but cannot run (model artifact missing/corrupt,
+                     requested device absent, dependencies missing); produced NO result
     FAILED           module raised an error
     """
     COMPLETED = "COMPLETED"
     NOT_IMPLEMENTED = "NOT_IMPLEMENTED"
     SKIPPED = "SKIPPED"
+    UNAVAILABLE = "UNAVAILABLE"
     FAILED = "FAILED"
 
 

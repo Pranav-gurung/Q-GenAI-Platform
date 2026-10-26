@@ -10,15 +10,20 @@ data/*
 !data/raw/
 !data/processed/
 !data/feedback/
+!data/cv/
 data/raw/*
 data/processed/*
 data/feedback/*
+data/cv/*
+!data/cv/README.md
 !data/*/.gitkeep
 *.db
 *.sqlite3
 
-# model weights (added in Part 2, never committed) - root-level only; backend/db/models is code
+# model weights / training outputs (never committed) - root-level only; backend/db/models is code
 /models/
+/artifacts/
+/runs/
 *.pt
 *.onnx
 *.engine

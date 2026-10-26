@@ -13,6 +13,9 @@ Routing rules (all based on REAL results only):
   * a module raises / violates its contract       -> FAILED (MODULE_ERROR / MODULE_CONTRACT_VIOLATION)
 
 A module that raises NotImplementedError is recorded as NOT_IMPLEMENTED (not a failure).
+A module that returns UNAVAILABLE (e.g. CV model artifact missing) is recorded with error code
+MODULE_UNAVAILABLE and logged as a warning; it produced no result, so routing continues as above
+and the inspection ends in REQUIRES_REVIEW rather than ever being auto-passed.
 The orchestrator knows nothing about HTTP or the database.
 """
 from __future__ import annotations
@@ -116,11 +119,13 @@ class PipelineOrchestrator:
         if result.processing_time_ms is None:
             result = result.model_copy(update={"processing_time_ms": duration})
         setattr(ctx, slot, result)
-        ctx.record_module(module.name, result.status, duration, result.message,
-                          failure.code if failure else None)
+        unavailable = result.status is ModuleStatus.UNAVAILABLE
+        code = failure.code if failure else ("MODULE_UNAVAILABLE" if unavailable else None)
+        ctx.record_module(module.name, result.status, duration, result.message, code)
         log_pipeline(ctx.inspection_id, state.value, result.status.value, module=module.name,
-                     duration_ms=duration, error_code=failure.code if failure else None,
-                     level=logging.ERROR if failure else logging.INFO)
+                     duration_ms=duration, error_code=code,
+                     message=(result.message or "") if unavailable else "",
+                     level=logging.ERROR if failure else (logging.WARNING if unavailable else logging.INFO))
         if failure:
             raise failure
         return result

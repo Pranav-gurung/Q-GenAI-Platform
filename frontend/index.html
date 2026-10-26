@@ -9,7 +9,7 @@
 <body>
   <header>
     <h1>Q-GenAI <span>Dark-store inspection</span></h1>
-    <p class="note">Part 1 foundation: AI modules are not implemented yet. Inspections are routed to operator review; no predictions are shown.</p>
+    <p class="note">Computer vision reports visual evidence; the decision comes from deterministic rules. Modules that are not configured or not available say so; nothing is guessed.</p>
   </header>
 
   <main>
@@ -34,6 +34,15 @@
         <dt>Decision</dt><dd id="r-decision"></dd>
         <dt>Reason</dt><dd id="r-reason"></dd>
       </dl>
+      <div id="r-cv" hidden>
+        <h3>Computer vision</h3>
+        <p id="r-cv-meta" class="meta"></p>
+        <canvas id="r-canvas" aria-label="Inspected image with detected defects"></canvas>
+        <table id="r-detections">
+          <thead><tr><th>Defect</th><th>Confidence</th><th>Severity</th><th>Box (px)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
       <h3>Pipeline stages</h3>
       <ol id="r-stages"></ol>
     </section>

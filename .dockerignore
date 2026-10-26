@@ -9,3 +9,7 @@ data
 !data/samples
 tests
 *.db
+artifacts
+runs
+*.pt
+*.onnx
