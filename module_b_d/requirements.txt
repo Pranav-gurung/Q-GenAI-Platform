@@ -1,0 +1,42 @@
+# Q-GenAI Sections B + D - pinned for Python 3.11 - 3.13 (tested on 3.13, Linux, CPU)
+#
+# PyTorch: for a smaller CPU-only install, install torch/torchvision FIRST with
+#   pip install torch==2.6.0 torchvision==0.21.0 --index-url https://download.pytorch.org/whl/cpu
+# then `pip install -r requirements.txt`. For NVIDIA GPUs use the matching CUDA index.
+
+# --- API / backend ---
+fastapi==0.115.6
+uvicorn[standard]==0.32.1
+python-multipart==0.0.20
+pydantic==2.10.3
+pydantic-settings==2.6.1
+python-dotenv==1.0.1
+SQLAlchemy==2.0.36
+
+# --- Security ---
+PyJWT==2.10.1
+argon2-cffi==23.1.0
+
+# --- Computer vision ---
+torch==2.6.0
+torchvision==0.21.0
+ultralytics==8.3.100
+opencv-python-headless==4.10.0.84
+# ultralytics depends on opencv-python; pin it too so pip doesn't pull an untested 5.x
+opencv-python==4.10.0.84
+pillow==11.0.0
+numpy==2.1.3
+PyYAML==6.0.2
+
+# --- Optional: ONNX inference (python -m training.export_onnx) ---
+onnx==1.18.0
+onnxruntime==1.20.1
+
+# --- Frontend ---
+streamlit==1.40.2
+requests==2.32.3
+pandas==2.2.3
+
+# --- Testing ---
+pytest==8.3.4
+httpx==0.27.2

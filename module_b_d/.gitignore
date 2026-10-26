@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+
+# Secrets / local config
+.env
+.env.*
+!.env.example
+
+# Runtime data
+storage/*
+!storage/.gitkeep
+*.db
+*.db-wal
+*.db-shm
+tamper_backup.json
+
+# Models, datasets and training outputs (large binaries)
+models/*
+!models/.gitkeep
+dataset/*
+!dataset/README.md
+dataset_smoke/
+runs/
+*.pt
+*.onnx
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
