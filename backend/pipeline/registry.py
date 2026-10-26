@@ -50,7 +50,13 @@ def _rules_decision(settings: Settings) -> PipelineModule:
 QUALITY_GATES: dict[str, Factory] = {"stub": lambda s: stubs.StubImageQualityGate(), "basic": _basic_quality_gate}
 CV_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubCVEngine(), "yolov8": _yolov8_engine}
 DECISION_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubDecisionEngine(), "rules": _rules_decision}
-PIPELINE_ANALYZERS: dict[str, Factory] = {"stub": lambda s: stubs.StubPipelineAnalyzer()}
+def _deterministic_analyzer(settings: Settings) -> PipelineModule:
+    from backend.fulfillment.engine import DeterministicPipelineAnalyzer
+    return DeterministicPipelineAnalyzer()
+
+
+PIPELINE_ANALYZERS: dict[str, Factory] = {"stub": lambda s: stubs.StubPipelineAnalyzer(),
+                                          "deterministic": _deterministic_analyzer}
 RCA_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubRCAEngine()}
 ACTION_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubActionEngine()}
 

@@ -51,7 +51,7 @@ class Settings(BaseSettings):
     quality_gate_engine: str = "stub"     # stub | basic
     cv_engine: str = "stub"               # stub | yolov8
     decision_engine: str = "stub"         # stub | rules
-    pipeline_analysis_engine: str = "stub"
+    pipeline_analysis_engine: str = "stub"  # stub | deterministic
     rca_engine: str = "stub"
     action_engine: str = "stub"
 

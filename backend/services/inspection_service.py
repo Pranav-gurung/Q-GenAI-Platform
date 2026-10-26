@@ -22,6 +22,7 @@ from backend.pipeline.transitions import ensure_transition
 from backend.schemas.common import new_id, utcnow
 from backend.schemas.inspection import InspectionCreate
 from backend.services.image_validation import validate_image
+from backend.services.fulfillment_service import load_trace_observations
 from backend.services.mappers import RESULT_SLOTS, image_to_schema
 from backend.services.storage import ImageStorage
 
@@ -32,6 +33,8 @@ logger = logging.getLogger(__name__)
 class InspectionFilters:
     store_id: str | None = None
     sku_id: str | None = None
+    order_id: str | None = None
+    item_id: str | None = None
     stage: FulfillmentStage | None = None
     status: PipelineState | None = None
 
@@ -54,7 +57,7 @@ class InspectionService:
         now = utcnow()
         insp = Inspection(
             inspection_id=new_id("INS"), store_id=data.store_id, sku_id=data.sku_id, order_id=data.order_id,
-            stage=data.stage, status=PipelineState.CREATED, source=data.source.value,
+            item_id=data.item_id, stage=data.stage, status=PipelineState.CREATED, source=data.source.value,
             operator_id=data.operator_id, metadata_=dict(data.metadata), created_at=now, updated_at=now,
         )
         insp.events.append(PipelineEvent(event_type="STATE_TRANSITION", to_state=PipelineState.CREATED,
@@ -119,9 +122,11 @@ class InspectionService:
         reference = image_row.storage_reference
         ctx = PipelineContext(
             inspection=InspectionInfo(inspection_id=insp.inspection_id, store_id=insp.store_id, sku_id=insp.sku_id,
-                                      stage=insp.stage, order_id=insp.order_id, metadata=dict(insp.metadata_ or {})),
+                                      stage=insp.stage, order_id=insp.order_id, metadata=dict(insp.metadata_ or {}),
+                                      item_id=insp.item_id),
             state=insp.status,
             image=ImageInput(metadata=image_to_schema(image_row), load_bytes=lambda: self.storage.load(reference)),
+            trace_observations=tuple(load_trace_observations(self.session, insp, exclude_current=True)),
         )
         self.orchestrator.run(ctx)
         self._persist(insp, ctx)

@@ -19,7 +19,7 @@ class StubImageQualityGate(ImageQualityGate):
     implemented = False
 
     def assess(self, image: ImageInput) -> ImageQualityResult:
-        return ImageQualityResult.not_implemented(STUB, "Image quality gate not implemented yet (planned: Part 3)")
+        return ImageQualityResult.not_implemented(STUB, "Placeholder image quality gate (real one: QUALITY_GATE_ENGINE=basic)")
 
 
 class StubCVEngine(CVEngine):
@@ -27,7 +27,7 @@ class StubCVEngine(CVEngine):
     implemented = False
 
     def detect(self, image: ImageInput) -> CVResult:
-        return CVResult.not_implemented(STUB, "Computer vision engine not implemented yet (planned: Part 2)")
+        return CVResult.not_implemented(STUB, "Placeholder CV engine (real one: CV_ENGINE=yolov8)")
 
 
 class StubDecisionEngine(DecisionEngine):
@@ -37,7 +37,7 @@ class StubDecisionEngine(DecisionEngine):
     def decide(self, cv_result: CVResult, inspection: InspectionInfo) -> QualityDecision:
         if not cv_result.is_real:
             return QualityDecision.skipped(STUB, "No computer vision result to decide on")
-        return QualityDecision.not_implemented(STUB, "Decision engine not implemented yet (planned: Part 2)")
+        return QualityDecision.not_implemented(STUB, "Placeholder decision engine (real one: DECISION_ENGINE=rules)")
 
 
 class StubPipelineAnalyzer(PipelineAnalyzer):
@@ -45,8 +45,8 @@ class StubPipelineAnalyzer(PipelineAnalyzer):
     implemented = False
 
     def analyze(self, context: PipelineContext) -> PipelineAnalysis:
-        return PipelineAnalysis.not_implemented(STUB, "Fulfillment pipeline analysis not implemented yet "
-                                                      "(planned: Part 4)")
+        return PipelineAnalysis.not_implemented(STUB, "Placeholder fulfillment analysis (real one: "
+                                                      "PIPELINE_ANALYSIS_ENGINE=deterministic)")
 
 
 class StubRCAEngine(RCAEngine):

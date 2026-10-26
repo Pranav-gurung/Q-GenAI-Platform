@@ -16,6 +16,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 from backend.domain.enums import (ActionPriority, DecisionOutcome, DecisionSource, DefectType,
                                   ModuleStatus, Severity)
 from backend.domain.fulfillment import FulfillmentStage
+from backend.schemas.fulfillment import FulfillmentTraceAnalysis
 
 Confidence = float  # constrained per-field with ge=0, le=1
 
@@ -166,12 +167,16 @@ class QualityDecision(ModuleResult):
 
 # ---------------------------------------------------------------- fulfillment analysis (Part 4)
 class PipelineAnalysis(ModuleResult):
-    payload_fields: ClassVar = ("suspected_stage", "stage_likelihoods", "evidence", "confidence")
+    """Deterministic implementation (Part 3): `trace_analysis` holds the structured result; `suspected_stage` is the
+    stage the current inspection's defect(s) were ATTRIBUTED to (first observed there after good evidence);
+    `evidence` lists explanation codes. `stage_likelihoods` / `confidence` stay empty: no probabilities are claimed."""
+    payload_fields: ClassVar = ("suspected_stage", "stage_likelihoods", "evidence", "confidence", "trace_analysis")
 
     suspected_stage: FulfillmentStage | None = None
     stage_likelihoods: dict[FulfillmentStage, float] = Field(default_factory=dict)
     evidence: list[str] = Field(default_factory=list)
     confidence: float | None = Field(None, ge=0, le=1)
+    trace_analysis: FulfillmentTraceAnalysis | None = None
 
 
 # ---------------------------------------------------------------- RCA (Part 5)

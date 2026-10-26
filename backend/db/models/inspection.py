@@ -20,6 +20,7 @@ class Inspection(Base):
     store_id: Mapped[str] = mapped_column(ForeignKey("stores.store_id"), index=True)
     sku_id: Mapped[str] = mapped_column(ForeignKey("skus.sku_id"), index=True)
     order_id: Mapped[str | None] = mapped_column(String(64), index=True)
+    item_id: Mapped[str | None] = mapped_column(String(64), index=True)  # unit / handling-unit id (trace key)
     stage: Mapped[FulfillmentStage] = mapped_column(str_enum(FulfillmentStage), index=True)
     status: Mapped[PipelineState] = mapped_column(str_enum(PipelineState), index=True)
     source: Mapped[str] = mapped_column(String(32))

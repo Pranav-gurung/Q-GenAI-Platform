@@ -27,7 +27,7 @@ class InspectionCreate(StrictModel):
     """Request body for POST /api/inspections."""
     model_config = StrictModel.model_config | ConfigDict(json_schema_extra={"example": {
         "store_id": "DS-BLR-001", "sku_id": "SKU-MILK-500ML", "stage": "PACKING",
-        "order_id": "ORD-100245", "operator_id": "OP-17", "source": "OPERATOR_APP",
+        "order_id": "ORD-100245", "item_id": "UNIT-0001", "operator_id": "OP-17", "source": "OPERATOR_APP",
         "metadata": {"station": "PACK-03"}}})
 
     store_id: ExternalId
@@ -35,6 +35,8 @@ class InspectionCreate(StrictModel):
     stage: FulfillmentStage
     order_id: ExternalId | None = Field(None, description="Customer order, when the inspection is tied to one "
                                                           "(typically PICKING onwards).")
+    item_id: ExternalId | None = Field(None, description="Physical unit / handling-unit id (barcode, LPN). Links "
+                                                         "inspections of the same item across fulfillment stages.")
     operator_id: ExternalId | None = None
     source: InspectionSource = InspectionSource.OPERATOR_APP
     metadata: Metadata = Field(default_factory=dict)
@@ -80,6 +82,7 @@ class InspectionEvent(BaseModel):
     store_id: str
     sku_id: str
     order_id: str | None = None
+    item_id: str | None = None
     stage: FulfillmentStage
     status: PipelineState
     source: InspectionSource

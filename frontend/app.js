@@ -80,6 +80,42 @@ function renderCv(insp, file) {
   drawDetections(file, cv.detections).catch(() => { document.getElementById("r-canvas").hidden = true; });
 }
 
+const label = (s) => s ? s.charAt(0) + s.slice(1).toLowerCase().replaceAll("_", " ") : "-";
+
+function renderFulfillment(trace) {
+  const box = document.getElementById("r-fulfillment");
+  if (!trace) { box.hidden = true; return; }
+  box.hidden = false;
+  const key = trace.trace;
+  document.getElementById("r-trace").textContent = key.key_type === "NONE"
+    ? "No item or order id: this inspection cannot be linked to other stages."
+    : `${key.key_type === "ITEM" ? "Item " + key.item_id : "Order " + key.order_id} · ${key.sku_id} · ` +
+      `${trace.observations.length} observation(s) · ${label(trace.status)}`;
+  document.getElementById("r-timeline").replaceChildren(...trace.timeline.map(t => {
+    const li = document.createElement("li");
+    li.className = "tl-" + t.status + (t.stage === trace.current_stage ? " current" : "");
+    const b = document.createElement("b"); b.textContent = t.stage;
+    li.append(b, document.createTextNode(t.status === "NOT_OBSERVED" ? "not observed" : t.status));
+    if (t.stage === trace.current_stage) li.style.outline = "2px solid currentColor";
+    return li;
+  }));
+  document.getElementById("r-defects").replaceChildren(...trace.defect_analyses.map(a => {
+    const card = document.createElement("div"); card.className = "defect-card";
+    const h = document.createElement("strong"); h.textContent = `${a.defect_type} · ${label(a.classification)}`;
+    const dl = document.createElement("dl");
+    for (const [k, v] of [["First observed", a.first_observed_stage], ["Last known good", a.last_known_good_stage ?? "none"],
+        ["Not inspected", a.missing_stages.length ? a.missing_stages.join(", ") : "none"],
+        ["Evidence", a.evidence_level], ["This stage", label(a.current_stage_attribution)],
+        ["Why", label(a.explanation_code)]]) {
+      const dt = document.createElement("dt"); dt.textContent = k;
+      const dd = document.createElement("dd"); dd.textContent = v;
+      dl.append(dt, dd);
+    }
+    card.append(h, dl);
+    return card;
+  }));
+}
+
 function render(insp, file) {
   document.getElementById("result").hidden = false;
   document.getElementById("r-id").textContent = insp.inspection_id;
@@ -119,12 +155,14 @@ form.addEventListener("submit", async (e) => {
   button.disabled = true;
   try {
     const payload = { store_id: form.store_id.value, sku_id: form.sku_id.value, stage: form.stage.value };
-    for (const k of ["order_id", "operator_id"]) if (form[k].value.trim()) payload[k] = form[k].value.trim();
+    for (const k of ["item_id", "order_id", "operator_id"]) if (form[k].value.trim()) payload[k] = form[k].value.trim();
     const created = await api("/inspections", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(payload) });
     render(created);
+    renderFulfillment(null);
     const data = new FormData();
     data.append("file", form.image.files[0]);
     render(await api(`/inspections/${created.inspection_id}/image`, { method: "POST", body: data }), form.image.files[0]);
+    renderFulfillment(await api(`/inspections/${created.inspection_id}/pipeline`));
   } catch (err) {
     showError(err.message);
   } finally {
