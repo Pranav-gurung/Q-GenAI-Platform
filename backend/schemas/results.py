@@ -59,6 +59,10 @@ class ModuleResult(BaseModel):
     def failed(cls, module: str, message: str):
         return cls(module=module, status=ModuleStatus.FAILED, message=message)
 
+    @classmethod
+    def unavailable(cls, module: str, message: str, module_version: str | None = None):
+        return cls(module=module, module_version=module_version, status=ModuleStatus.UNAVAILABLE, message=message)
+
 
 # ---------------------------------------------------------------- image quality (Part 3)
 class ImageQualityResult(ModuleResult):
@@ -86,13 +90,20 @@ class BoundingBox(BaseModel):
 
 
 class Detection(BaseModel):
-    """One model detection (one box)."""
+    """One model detection (one box).
+
+    Coordinates: `bbox` is in PIXELS of the inspected image (after EXIF orientation is applied),
+    origin top-left, x to the right, y down, (x_min, y_min, x_max, y_max). `area_ratio` is the box
+    area divided by the image area (0-1).
+    """
     model_config = ConfigDict(extra="forbid")
     defect_type: DefectType
     confidence: float = Field(ge=0, le=1)
     bbox: BoundingBox | None = None
     severity: Severity | None = None
     mask_ref: str | None = None
+    model_class: str | None = Field(None, description="Raw class name emitted by the model.")
+    area_ratio: float | None = Field(None, ge=0, le=1)
 
 
 class Defect(BaseModel):
@@ -104,13 +115,36 @@ class Defect(BaseModel):
     detection_count: int = Field(ge=1)
 
 
+class CVInferenceMetadata(BaseModel):
+    """How a CV result was produced. Present only when inference actually ran."""
+    model_config = ConfigDict(extra="forbid", protected_namespaces=())
+    model_name: str = Field(examples=["yolov8n"])
+    model_version: str
+    model_framework: str = Field(examples=["ultralytics 8.4.190 / torch 2.x"])
+    model_artifact: str = Field(description="Artifact file name and short content hash (no absolute paths).")
+    inference_device: str = Field(description="Device actually used, e.g. 'cpu' or 'cuda:0'.")
+    image_size: int = Field(description="Model input size (letterboxed square, pixels).")
+    image_width: int = Field(gt=0, description="Inspected image width (pixels, after EXIF orientation).")
+    image_height: int = Field(gt=0)
+    confidence_threshold: float = Field(ge=0, le=1)
+    iou_threshold: float = Field(ge=0, le=1)
+    max_detections: int = Field(gt=0)
+    preprocess_ms: float | None = Field(None, ge=0)
+    inference_time_ms: float = Field(ge=0, description="Model forward pass only.")
+    postprocess_ms: float | None = Field(None, ge=0)
+    raw_detection_count: int = Field(ge=0, description="Model boxes before Q-GenAI confidence filtering.")
+
+
 class CVResult(ModuleResult):
-    payload_fields: ClassVar = ("detections", "defects", "classification", "overall_confidence")
+    payload_fields: ClassVar = ("detections", "defects", "classification", "overall_confidence", "inference")
 
     detections: list[Detection] = Field(default_factory=list)
     defects: list[Defect] = Field(default_factory=list)
-    classification: str | None = Field(None, description="Optional image-level label, e.g. 'DAMAGED'.")
-    overall_confidence: float | None = Field(None, ge=0, le=1)
+    classification: str | None = Field(None, description="Image-level summary: 'DEFECTS_DETECTED' or "
+                                                          "'NO_DEFECTS_DETECTED' (only when inference ran).")
+    overall_confidence: float | None = Field(None, ge=0, le=1, description="Highest detection confidence; "
+                                                                          "null when nothing was detected.")
+    inference: CVInferenceMetadata | None = None
 
 
 # ---------------------------------------------------------------- decision

@@ -31,6 +31,11 @@ class PipelineModule(ABC):
     #: False for placeholders; surfaced by /api/health so nobody mistakes a stub for a model.
     implemented: ClassVar[bool] = True
 
+    def health(self) -> dict:
+        """Runtime status for /api/health. Modules that depend on artifacts (models) override this
+        and MUST report `available: False` when they cannot actually run."""
+        return {}
+
 
 class ImageQualityGate(PipelineModule):
     @abstractmethod

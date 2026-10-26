@@ -2,10 +2,12 @@
 
 **Computer-vision-first quality intelligence for quick-commerce dark stores.**
 
-> **Status: Part 1 of 7, Foundation + Pipeline Architecture.**
-> The inspection pipeline, API, database, image handling and operator UI are implemented.
-> **No AI is implemented yet.** Every AI module is a placeholder that reports `NOT_IMPLEMENTED`
-> and produces no detections, scores or decisions. Inspections are routed to human review.
+> **Status: Part 2 of 7, Computer Vision inspection engine** (on top of Part 1: foundation + pipeline).
+> Implemented: inspection pipeline, API, database, operator UI, an image quality gate, a **real YOLOv8
+> CV engine**, deterministic decision rules, and dataset / training / evaluation tooling.
+> **The only trained model is a demo model trained on SYNTHETIC data.** It proves the engineering end to end.
+> It is **not** evidence of accuracy on real product photos (see [Computer Vision](#computer-vision-part-2)).
+> Fulfillment analysis, RCA, corrective actions and active learning are still placeholders (`NOT_IMPLEMENTED`).
 
 ---
 
@@ -52,16 +54,16 @@ a **PipelineOrchestrator**. Each AI capability is a plug-in module behind a type
                 └────────┬────────┘
                          ▼   PipelineOrchestrator  (Part 1 ✅)
                 ┌─────────────────┐
-                │ Image Quality   │   ImageQualityGate   → stub  (Part 3)
+                │ Image Quality   │   ImageQualityGate   → basic (Part 2 ✅; advanced: Part 3)
                 │ Gate            │
                 └────────┬────────┘
                          ▼
                 ┌─────────────────┐
-                │ Computer Vision │   CVEngine           → stub  (Part 2)
+                │ Computer Vision │   CVEngine           → yolov8 (Part 2 ✅)
                 └────────┬────────┘
                          ▼
                 ┌─────────────────┐
-                │ Decision Engine │   DecisionEngine     → stub  (Part 2/4)
+                │ Decision Engine │   DecisionEngine     → rules (Part 2 ✅)
                 └────────┬────────┘
                          ▼
                 ┌─────────────────┐
@@ -89,7 +91,7 @@ a **PipelineOrchestrator**. Each AI capability is a plug-in module behind a type
                          └──────────► CV MODEL
 ```
 
-## What Part 1 implements
+## What is implemented
 
 | Area | Implemented | Where |
 |---|---|---|
@@ -111,14 +113,20 @@ a **PipelineOrchestrator**. Each AI capability is a plug-in module behind a type
 | Minimal operator UI | ✅ | `frontend/` |
 | Docker Compose (Postgres + API) | ✅ | `docker-compose.yml`, `docker/` |
 | Tests (unit, API, integration; SQLite + optional PostgreSQL) | ✅ | `tests/` |
+| **Part 2:** YOLOv8 CV engine (`CV_ENGINE=yolov8`), model versioning, CPU/GPU | ✅ | `ml/cv/yolo_engine.py`, `model.py` |
+| **Part 2:** Image quality gate (`QUALITY_GATE_ENGINE=basic`) | ✅ | `ml/cv/quality.py` |
+| **Part 2:** Deterministic decision rules (`DECISION_ENGINE=rules`) | ✅ | `backend/pipeline/decision_rules.py` |
+| **Part 2:** Defect taxonomy, severity mapping, postprocessing | ✅ | `ml/cv/taxonomy.yaml`, `severity.py`, `postprocess.py` |
+| **Part 2:** Dataset validator, synthetic demo data, training, evaluation, predict, visualize, benchmark, ONNX export | ✅ | `ml/cv/*.py` |
 
-**Not implemented (by design):** CV model / YOLO, image-quality algorithms, decision rules,
-fulfillment analysis, RCA, RAG / vector DB, LLMs, SOP generation, active-learning training,
-analytics dashboards, user accounts / RBAC.
+**Not implemented yet (by design):** fulfillment analysis, RCA, RAG / vector DB, LLMs, SOP generation,
+active-learning training, analytics dashboards, user accounts / RBAC. Also not implemented: any model trained
+on real product photos.
 
 ### Honest placeholders: "no result" is never a fake result
 
-* Every module result carries `status`: `COMPLETED | NOT_IMPLEMENTED | SKIPPED | FAILED`.
+* Every module result carries `status`: `COMPLETED | NOT_IMPLEMENTED | SKIPPED | UNAVAILABLE | FAILED`.
+  `UNAVAILABLE` means a real module is configured but cannot run (for example, the CV model file is missing).
 * The result schemas **reject** payload values (confidence, detections, outcome, …) on anything that
   is not `COMPLETED`, so a stub *cannot* emit a fake "94% confidence".
 * An inspection without a **real** decision never auto-passes or auto-fails. It ends in
@@ -140,19 +148,20 @@ q-genai/
 │   ├── services/             use cases: inspections, feedback, reference data,
 │   │                         image validation, storage/
 │   └── db/                   SQLAlchemy models, session, Alembic migrations
-├── ml/                       future model implementations (preprocessing/, detection/, inference/)
+├── ml/cv/                    computer vision: taxonomy, quality gate, YOLO engine, dataset tools, training
 ├── frontend/                 static operator UI (no build step), served at /
-├── data/                     raw/ processed/ feedback/ (git-ignored), samples/ (simulated data)
+├── data/                     raw/ processed/ feedback/ cv/ (git-ignored), samples/ (simulated data)
+├── artifacts/cv/             trained model versions (git-ignored)
 ├── documents/                future SOP corpus for RAG (Part 5)
 ├── scripts/                  seed_sample_data.py, smoke_test.sh
 ├── docker/                   Dockerfile, entrypoint (migrate → seed → serve)
-└── tests/                    unit/ api/ integration/
+└── tests/                    unit/ api/ integration/ cv/
 ```
 
 **Dependency rules**
 
 ```
-api  →  services  →  pipeline (orchestrator → interfaces)  ←  ml (future implementations)
+api  →  services  →  pipeline (orchestrator → interfaces)  ←  ml/cv (implementations)
               ↘  db, storage
 ```
 
@@ -195,29 +204,29 @@ decision PASS → `COMPLETED`; decision REVIEW → `REQUIRES_REVIEW`; decision F
 
 ### Module contracts
 
-| Interface | Contract | Planned |
+| Interface | Contract | Implementations |
 |---|---|---|
-| `ImageQualityGate.assess` | `ImageInput → ImageQualityResult` | Part 3 |
-| `CVEngine.detect` | `ImageInput → CVResult` (detections: bbox, defect type, confidence, severity; model version; time) | Part 2 |
-| `DecisionEngine.decide` | `CVResult + InspectionInfo → QualityDecision` (PASS/FAIL/REVIEW, reason, confidence, severity, source) | Part 2/4 |
-| `PipelineAnalyzer.analyze` | `PipelineContext → PipelineAnalysis` (suspected stage, likelihoods, evidence) | Part 4 |
-| `RCAEngine.analyze` | `PipelineContext → RCAResult` (possible causes, evidence, confidence, investigation) | Part 5 |
-| `ActionEngine.recommend` | `RCAResult + context → ActionRecommendation` (action, priority, responsible stage, instructions) | Part 5 |
-| Feedback | `InspectionResult + operator feedback → FeedbackRecord` (`learning_status=PENDING`) | Part 1 store / Part 6 learn |
+| `ImageQualityGate.assess` | `ImageInput → ImageQualityResult` | `stub`, **`basic`** (Part 2); advanced checks in Part 3 |
+| `CVEngine.detect` | `ImageInput → CVResult` (detections: bbox, defect type, confidence, severity; inference metadata) | `stub`, **`yolov8`** (Part 2) |
+| `DecisionEngine.decide` | `CVResult + InspectionInfo → QualityDecision` (PASS/FAIL/REVIEW, reason, confidence, severity, source) | `stub`, **`rules`** (Part 2) |
+| `PipelineAnalyzer.analyze` | `PipelineContext → PipelineAnalysis` (suspected stage, likelihoods, evidence) | `stub` (Part 4) |
+| `RCAEngine.analyze` | `PipelineContext → RCAResult` (possible causes, evidence, confidence, investigation) | `stub` (Part 5) |
+| `ActionEngine.recommend` | `RCAResult + context → ActionRecommendation` (action, priority, responsible stage, instructions) | `stub` (Part 5) |
+| Feedback | `InspectionResult + operator feedback → FeedbackRecord` (`learning_status=PENDING`) | stored (Part 1); learning in Part 6 |
 
-Plugging in a real CV model in Part 2 looks like this:
+Modules are registered in `backend/pipeline/registry.py` and selected by env var. Part 2 plugged in the CV engine this way:
 
 ```python
-# ml/detection/yolo_engine.py
-class YoloCVEngine(CVEngine):
-    name = "yolov8"
-    def detect(self, image: ImageInput) -> CVResult: ...
-
 # backend/pipeline/registry.py
-CV_ENGINES["yolov8"] = lambda s: YoloCVEngine(weights=s.model_path / "best.onnx")
+def _yolov8_engine(settings):
+    from ml.cv.yolo_engine import YoloCVEngine   # torch imported only when selected
+    return YoloCVEngine(settings)
+
+CV_ENGINES = {"stub": ..., "yolov8": _yolov8_engine}
 ```
 
-Then set `CV_ENGINE=yolov8`. No API, database or orchestrator changes are needed.
+No API, database or orchestrator changes were needed. A module that depends on an artifact implements `health()`, and
+if it can't run it returns `UNAVAILABLE` rather than a result.
 
 ### Data model
 
@@ -232,6 +241,252 @@ Then set `CV_ENGINE=yolov8`. No API, database or orchestrator changes are needed
 
 Enum-like columns (stage, status, …) are stored as `VARCHAR`, so adding a fulfillment stage needs no
 schema migration.
+
+## Computer Vision (Part 2)
+
+> **Key principle: computer vision detects visual evidence; deterministic application logic makes the
+> operational decision.** The CV engine reports *what* it sees, *where*, *how confident* the model is and
+> *how severe* each finding is. It never decides PASS / FAIL. `DECISION_ENGINE=rules` does that, using
+> explicit, configurable thresholds.
+
+### Architecture
+
+```
+POST /api/inspections/{id}/image                      (unchanged Part 1 API)
+   │  upload validation: type, size, corruption       backend/services/image_validation.py
+   ▼
+storage (ImageStorage)  ──►  PipelineOrchestrator
+   ▼
+QUALITY_CHECK   BasicImageQualityGate                 ml/cv/quality.py
+   │  blur, resolution, brightness, aspect ratio      reject → REQUIRES_REVIEW (IMAGE_QUALITY_REJECTED)
+   ▼
+CV_PROCESSING   YoloCVEngine (CVEngine)               ml/cv/yolo_engine.py
+   │  decode + EXIF orientation → RGB → BGR           ml/cv/preprocessing.py
+   │  YOLOv8 predict (letterbox, NMS)                 Ultralytics, model cached in memory
+   │  validate output, map class → taxonomy,          ml/cv/postprocess.py
+   │  confidence filter, clip boxes, severity         ml/cv/severity.py
+   ▼  CVResult (detections + inference metadata)
+DECISION        RulesDecisionEngine                   backend/pipeline/decision_rules.py
+   ▼
+PIPELINE_ANALYSIS → RCA → ACTION                      (still placeholders: Parts 4–5)
+```
+
+The real engine plugs in through the **existing** `CVEngine` interface and registry. There is no separate CV API.
+`CV_ENGINE=stub` still works, and the backend runs without torch installed as long as `yolov8` isn't selected.
+
+### Model / framework
+
+* **YOLOv8n** (Ultralytics **8.4.190**, PyTorch 2.x), starting from COCO-pretrained `yolov8n.pt` and fine-tuned.
+  It's the most widely used, best documented YOLO implementation, with one dependency for train / val /
+  predict / export, CPU and CUDA support, and a 3.2M-parameter model that runs on CPU.
+* **Licensing:** Ultralytics and its pretrained weights are **AGPL-3.0**. That's fine for this open repository.
+  A closed-source / SaaS deployment needs an Ultralytics Enterprise licence, or a swap to a permissively
+  licensed detector behind the same `CVEngine` interface (the postprocessing is framework-independent).
+
+### Defect taxonomy
+
+Defined once in `ml/cv/taxonomy.yaml`. Class ids/names, platform `DefectType`, base severity, safety-critical
+flag and data status all come from it. Model class names are mapped **by name**, and a model emitting an
+unknown class is rejected at load time.
+
+| id | class | DefectType | base severity | safety-critical | data status |
+|---|---|---|---|---|---|
+| 0 | crushed_packaging | CRUSHED_PACKAGE | MEDIUM | – | placeholder |
+| 1 | torn_packaging | TORN_PACKAGE | MEDIUM | – | **synthetic_demo** |
+| 2 | leakage | LEAKING_PACKAGE | HIGH | ✔ | **synthetic_demo** |
+| 3 | broken_seal | BROKEN_SEAL | HIGH | ✔ | placeholder |
+| 4 | opened_package | OPENED_PACKAGE | HIGH | ✔ | placeholder |
+| 5 | dented_container | DENTED_CONTAINER | MEDIUM | – | **synthetic_demo** |
+| 6 | damaged_box | DAMAGED_BOX | LOW | – | **synthetic_demo** |
+| 7 | missing_label | MISSING_LABEL | MEDIUM | – | **synthetic_demo** |
+| 8 | wrong_item | INCORRECT_ITEM | HIGH | – | placeholder |
+| 9 | visual_anomaly | VISUAL_ANOMALY | LOW | – | placeholder |
+
+* **synthetic_demo** (5 classes): trainable and detected by the demo model, but **only on synthetic images**.
+* **placeholder** (5 classes): no data exists. The demo model has never seen them, so it **cannot** detect
+  them, and no metric is claimed. `wrong_item` needs SKU reference images (a matching problem, not just detection).
+* **real**: none yet. No real-world dataset has been collected.
+
+### Severity (deterministic)
+
+```
+severity = base_severity(class)
+if box_area / image_area >= CV_SEVERITY_LARGE_AREA_RATIO (0.20):  severity += 1 level
+if class.safety_critical:                                         severity  = max(severity, HIGH)
+(capped at CRITICAL)
+```
+
+Confidence does **not** change severity. Severity describes impact; confidence describes certainty.
+The decision rules combine the two. No randomness, no ML, no LLM.
+
+### Decision rules (`DECISION_ENGINE=rules`)
+
+| CV result | Decision |
+|---|---|
+| CV did not run (stub / `UNAVAILABLE` / failed) | **no decision** (`SKIPPED`): the inspection goes to `REQUIRES_REVIEW` and is never auto-passed |
+| any detection with severity ≥ `DECISION_FAIL_MIN_SEVERITY` (HIGH) **and** confidence ≥ `DECISION_FAIL_MIN_CONFIDENCE` (0.5) | **FAIL** |
+| other detections | **REVIEW** |
+| no detections | **REVIEW** by default; **PASS** only if `DECISION_AUTO_PASS=true` |
+
+Auto-pass is off by default. The model covers 5 of 10 classes, and only on synthetic data, so
+"nothing detected" is not evidence that the product is fine.
+
+### Detection output and coordinates
+
+```json
+{"defect_type": "LEAKING_PACKAGE", "model_class": "leakage", "confidence": 0.91, "severity": "HIGH",
+ "bbox": {"x_min": 212.4, "y_min": 301.0, "x_max": 330.8, "y_max": 362.5}, "area_ratio": 0.042}
+```
+
+`bbox` is in **pixels** of the inspected image *after EXIF orientation*. The origin is top-left, x points
+right and y points down, and the box is (x_min, y_min) to (x_max, y_max). Normalised 0–1 coordinates appear
+only in YOLO training label files. Each CV result also carries `inference`: model name, version, framework,
+artifact (`best.pt@sha256:…`), device actually used, image size, thresholds, pre/inference/post-process ms and
+the raw box count. The version is also stored in `inspection_results.cv_model_version` and in `model_versions.cv`.
+
+### Confidence threshold (`CV_CONFIDENCE_THRESHOLD`, default 0.35)
+
+* **Lower** catches more real defects (fewer false negatives), but gives more false alarms and therefore more reviews.
+* **Higher** gives fewer false alarms, but misses more defects. Missed defects aren't reviewed at all when auto-pass is on.
+* Per-class overrides: add `min_confidence:` to a class in `taxonomy.yaml`.
+* The `image_level` block in `metrics.json` shows the flag rate at the deployment threshold. Tune the threshold
+  on **real** validation data before trusting it.
+
+### Image quality gate (`QUALITY_GATE_ENGINE=basic`)
+
+This gate runs after upload validation (which already checks type, size and corruption) and judges only whether
+the content can be used. It's conservative, so imperfect but usable photos pass.
+
+| Check | Default | Meaning |
+|---|---|---|
+| `CV_MIN_IMAGE_WIDTH` / `HEIGHT` | 128 px | smaller → `LOW_RESOLUTION` |
+| `CV_MAX_ASPECT_RATIO` | 6 | long/short side above this → `EXTREME_ASPECT` |
+| `CV_BLUR_THRESHOLD` | 15 | variance of Laplacian on grayscale resized to a 512 px long side; below → `BLURRY` (sharp photos are typically ≫100) |
+| `CV_MIN_BRIGHTNESS` / `CV_MAX_BRIGHTNESS` | 20 / 240 | mean luminance 0–255 → `TOO_DARK` / `TOO_BRIGHT` |
+
+A rejected image moves the inspection to `REQUIRES_REVIEW` (`IMAGE_QUALITY_REJECTED`). The operator retakes the
+photo with a new upload, and CV doesn't run on the rejected image.
+
+### Preprocessing
+
+* **Inference (deterministic):** decode → EXIF orientation → RGB → BGR. The YOLO predictor then letterboxes to
+  the image size (training size by default, aspect ratio preserved), scales to [0, 1] and maps boxes back to
+  original pixels. There's no sharpening, denoising or colour correction that could hide a defect.
+* **Training (stochastic, `train.py` only):** moderate HSV jitter, translate, scale, horizontal flip, mosaic
+  (`TRAINING_AUGMENTATION` in `ml/cv/preprocessing.py`).
+
+### Dataset, validation, training, evaluation
+
+```bash
+pip install -e ".[cv]"                       # ultralytics + torch (CPU wheel: see pyproject.toml comment)
+
+python -m ml.cv.synthetic --out data/cv/synthetic-v1 --images 800 --seed 42     # SYNTHETIC / DEMO data
+python -m ml.cv.validate_dataset --data data/cv/synthetic-v1/dataset.yaml       # exit 1 if invalid
+python -m ml.cv.train --data data/cv/synthetic-v1/dataset.yaml \
+    --version qgenai-yolov8n-synthetic-v1 --base yolov8n.pt --epochs 30 --imgsz 416 --seed 42 --device auto
+python -m ml.cv.evaluate --model artifacts/cv/qgenai-yolov8n-synthetic-v1/model/best.pt \
+    --data data/cv/synthetic-v1/dataset.yaml --split test --out /tmp/metrics.json
+```
+
+The dataset format, split rules and how to add real data are in [`data/cv/README.md`](data/cv/README.md).
+`train.py` validates the dataset first and aborts on errors. It then trains with a fixed seed and deterministic
+settings, and evaluates on val and test.
+
+**Model artifacts** (git-ignored; weights are never committed):
+
+```
+artifacts/cv/<model-version>/
+  model/best.pt     weights                       metrics.json   val + test metrics (machine-readable)
+  metadata.json     version, framework, base checkpoint, classes (+ train instances, trained yes/no),
+                    training params, duration, data provenance ("synthetic_demo")
+  runs/             raw Ultralytics training logs (results.csv)
+```
+
+A fresh clone has **no model**. With `CV_ENGINE=yolov8` and no artifact, the app still starts: `/api/health`
+reports `status: degraded` and `cv_engine.available: false, error: "MODEL_NOT_FOUND: …"`. Every inspection
+records CV as `UNAVAILABLE`, gets no decision, and goes to review. Run the commands above (≈25 min on 4 CPU
+cores) to produce the demo model.
+
+### Demo model results: SYNTHETIC / DEMO validation only
+
+Model `qgenai-yolov8n-synthetic-v1`: YOLOv8n fine-tuned from COCO `yolov8n.pt` (sha256 `f59b3d833e2f…`).
+Trained for 30 epochs at 416 px, batch 16, seed 42, on CPU (4 vCPU), in **19.2 min**.
+The data was 800 synthetic images: 560 train / 120 val / 120 test.
+
+| Split | Precision | Recall | mAP@0.5 | mAP@0.5:0.95 |
+|---|---|---|---|---|
+| val (synthetic) | 0.994 | 1.000 | 0.995 | 0.953 |
+| test (synthetic, held out) | 0.994 | 1.000 | 0.995 | 0.956 |
+
+Per class, test split:
+
+| Class | Instances | P | R | AP50 | AP50-95 |
+|---|---|---|---|---|---|
+| crushed_packaging | 0 | – | – | – | – (no data: not evaluated, cannot be detected) |
+| torn_packaging | 24 | 0.997 | 1.000 | 0.995 | 0.903 |
+| leakage | 54 | 0.997 | 1.000 | 0.995 | 0.985 |
+| broken_seal | 0 | – | – | – | – (no data: not evaluated, cannot be detected) |
+| opened_package | 0 | – | – | – | – (no data: not evaluated, cannot be detected) |
+| dented_container | 18 | 0.992 | 1.000 | 0.995 | 0.958 |
+| damaged_box | 12 | 0.988 | 1.000 | 0.995 | 0.942 |
+| missing_label | 40 | 0.996 | 1.000 | 0.995 | 0.993 |
+| wrong_item | 0 | – | – | – | – (no data: not evaluated, cannot be detected) |
+| visual_anomaly | 0 | – | – | – | – (no data: not evaluated, cannot be detected) |
+
+At the deployment threshold (0.35) on the test split: the confusion matrix shows all 148
+objects matched to the correct class, with 0 missed, 0 false positives and 0 cross-class confusions. At image level,
+102 of 102 defect images were flagged and 0 of 18 clean images were flagged
+(flag rate 85%). Full machine-readable results are in `artifacts/cv/<version>/metrics.json`.
+
+The near-perfect scores mean only that **the synthetic task is easy**. The generator draws defects as simple,
+high-contrast shapes.
+
+**These numbers come from held-out synthetic images drawn by the same generator as the training data. They show
+that the training, evaluation and inference pipeline works. They say nothing about accuracy on real
+photos.** Real-world validation requires a real annotated dataset (see `data/cv/README.md`). No real-world
+validation has been done.
+
+### Inference, visualization, benchmark, export
+
+```bash
+python -m ml.cv.predict --image photo.jpg --save-visualization annotated.jpg   # JSON: quality + cv result
+python -m ml.cv.visualize --input photo.jpg --output annotated.jpg              # boxes from real inference only
+python -m ml.cv.benchmark --images data/cv/synthetic-v1/images/test --limit 100
+pip install -e ".[cv-export]" && python -m ml.cv.export --check                 # optional ONNX artifact
+```
+
+Measured with `ml.cv.benchmark` on 100 held-out synthetic images × 2 runs, CPU only (4 vCPU
+Intel Xeon @ 2.3 GHz, no GPU), image size 416:
+
+| | mean | median | p95 |
+|---|---|---|---|
+| model forward pass (`inference_time_ms`) | 24.3 ms | 24.0 ms | 27.7 ms |
+| engine end to end (decode → postprocess) | 28.8 ms | 28.6 ms | 32.4 ms |
+
+These numbers apply to this machine only. Larger photos, a larger `CV_IMAGE_SIZE` or a bigger model will be slower.
+
+ONNX export is a future deployment artifact. The Part 2 engine always runs the PyTorch weights.
+
+### CPU / GPU
+
+`CV_DEVICE=auto` uses `cuda:0` when PyTorch sees a GPU, otherwise `cpu`. `CV_DEVICE=cpu` forces CPU.
+`CV_DEVICE=cuda` (or `cuda:N`) on a machine without that GPU is a **clear error**: the engine reports
+`DEVICE_UNAVAILABLE` and does not silently fall back. The device actually used is recorded in every result
+(`inference.inference_device`) and in `/api/health`. The tests and numbers in this README were produced
+on **CPU only**; no GPU run has been tested.
+
+### Running the API with the real engine
+
+```bash
+# .env
+CV_ENGINE=yolov8
+QUALITY_GATE_ENGINE=basic
+DECISION_ENGINE=rules
+CV_MODEL_PATH=artifacts/cv/qgenai-yolov8n-synthetic-v1/model/best.pt
+```
+
+The upload endpoint, the database and the UI are unchanged. The UI now shows the decision, the detections
+(type, confidence, severity, box), the model version and inference time, with boxes drawn on the uploaded image.
 
 ## Local setup
 
@@ -294,8 +549,19 @@ End-to-end smoke test against a running server: `scripts/smoke_test.sh http://lo
 | `MAX_UPLOAD_MB` | `10` | Upload size limit |
 | `ALLOWED_IMAGE_TYPES` | `jpeg,png,webp` | Accepted formats (checked against decoded content) |
 | `MAX_IMAGE_PIXELS` | `40000000` | Decompression-bomb guard |
-| `QUALITY_GATE_ENGINE`, `CV_ENGINE`, `DECISION_ENGINE`, `PIPELINE_ANALYSIS_ENGINE`, `RCA_ENGINE`, `ACTION_ENGINE` | `stub` | Module implementation selection |
-| `MODEL_PATH` | `models/` | Model weights location (used from Part 2) |
+| `QUALITY_GATE_ENGINE` / `CV_ENGINE` / `DECISION_ENGINE` | `stub` | `basic` / `yolov8` / `rules` enable the Part 2 modules |
+| `PIPELINE_ANALYSIS_ENGINE`, `RCA_ENGINE`, `ACTION_ENGINE` | `stub` | Only `stub` exists (Parts 4–5) |
+| `CV_MODEL_PATH` | `artifacts/cv/qgenai-yolov8n-synthetic-v1/model/best.pt` | Model weights |
+| `CV_MODEL_VERSION` | *(from metadata.json)* | Version override |
+| `CV_DEVICE` | `auto` | `auto` / `cpu` / `cuda` / `cuda:N` (an unavailable CUDA device is an error, not a fallback) |
+| `CV_CONFIDENCE_THRESHOLD` / `CV_IOU_THRESHOLD` | `0.35` / `0.5` | Detection threshold / NMS overlap |
+| `CV_IMAGE_SIZE` | *(training size)* | Inference letterbox size |
+| `CV_MAX_DETECTIONS` | `50` | Detections kept per image |
+| `CV_TAXONOMY_PATH` | `ml/cv/taxonomy.yaml` | Defect taxonomy |
+| `CV_SEVERITY_LARGE_AREA_RATIO` | `0.20` | Box/image area that escalates severity by one level |
+| `CV_MIN_IMAGE_WIDTH` / `HEIGHT`, `CV_MAX_ASPECT_RATIO`, `CV_BLUR_THRESHOLD`, `CV_MIN_BRIGHTNESS` / `MAX` | 128 / 128, 6, 15, 20 / 240 | Quality gate thresholds |
+| `DECISION_FAIL_MIN_SEVERITY` / `DECISION_FAIL_MIN_CONFIDENCE` | `HIGH` / `0.5` | Automatic FAIL criteria |
+| `DECISION_AUTO_PASS` | `false` | PASS when CV finds nothing (off by default) |
 
 Secrets live only in `.env` or the deployment environment. `.env` is git-ignored and docker-ignored.
 
@@ -348,7 +614,7 @@ Set `LOG_FORMAT=json` for one JSON object per line. Image bytes and secrets are 
 ## Tests
 
 ```bash
-pytest                                   # unit + API + integration on SQLite
+pytest                                   # unit + API + integration on SQLite (+ CV tests if ultralytics is installed)
 TEST_DATABASE_URL=postgresql+psycopg://qgenai:<pw>@localhost:5432/qgenai_test pytest tests/integration
                                          # also runs migrations + persistence on a disposable PostgreSQL DB
 ```
@@ -359,23 +625,43 @@ wrong extension, mismatched content, oversized, pixel bomb, corrupt, empty), sto
 protection, configuration guards, all API endpoints, the error envelope, optional API-key auth,
 Alembic migrations, and a full persisted lifecycle.
 
+**CV tests** (`tests/cv/`, skipped automatically without `.[cv]`) cover:
+* taxonomy, severity, postprocessing (class mapping, thresholds, clipping, malformed outputs), preprocessing,
+  quality gate, decision rules, the dataset validator (every error class) and the synthetic generator.
+* the real `YoloCVEngine`, using a **seeded, untrained YOLOv8n built at test time**. This is genuine Ultralytics
+  inference whose outputs are meaningless, so the mechanics can be tested deterministically without committing
+  weights. Also: missing / corrupt model, CUDA-unavailable, taxonomy mismatch, model versioning, caching.
+* end-to-end API runs: upload → quality gate → real inference → decision → pipeline → persistence → health.
+* one test that needs the **trained demo artifact** (skipped if it hasn't been trained): it checks that the
+  model finds the labelled defect class in ≥ 80% of held-out *synthetic* defect images.
+
 ## Roadmap
 
 | Part | Scope | Status |
 |---|---|---|
-| **1** | Foundation + pipeline architecture | ✅ this commit |
-| 2 | Computer Vision (dataset, YOLO training, ONNX inference as `CVEngine`, decision rules) | planned |
-| 3 | Image Quality Gate (blur, exposure, framing, retake loop) | planned |
+| 1 | Foundation + pipeline architecture | ✅ |
+| **2** | Computer Vision (YOLOv8 `CVEngine`, basic quality gate, decision rules, dataset/training/eval tooling) | ✅ this commit (demo model: synthetic data only) |
+| 3 | Image Quality Gate, advanced (glare, framing/occlusion, product-in-frame, retake UX) | planned |
 | 4 | Fulfillment Intelligence (where in the flow damage happened, stage analytics) | planned |
 | 5 | GenAI RCA + RAG (SOP retrieval, grounded root cause, corrective actions) | planned |
 | 6 | Active Learning (feedback review → labelled data → retraining → model versions) | planned |
 | 7 | Minimal security + production hardening (operator auth/roles, async workers, object storage) | planned |
 
-## Known limitations (Part 1)
+## Known limitations
 
-* No AI: every inspection ends in `REQUIRES_REVIEW` until an operator submits feedback.
-* The pipeline runs synchronously inside the upload request. That's fine for stubs, but real models will
-  need a background worker or queue (Part 7). The orchestrator is already HTTP-independent.
+* **No real-world model.** The only trained model learned from synthetic cartoon scenes. Expect it to perform
+  poorly on real photos until it is retrained on a real annotated dataset. Its metrics are demo metrics.
+* 5 of 10 taxonomy classes have no data at all (`placeholder`), and `wrong_item` needs SKU reference matching.
+* Fulfillment analysis, RCA and corrective actions are still placeholders. A FAIL decision therefore ends in
+  `REQUIRES_REVIEW` (`NO_CORRECTIVE_ACTION`), and inspections without a real decision go to human review.
+* Inference runs synchronously inside the upload request, one image at a time per process (the model is guarded
+  by a lock). That's fine for a demo, but production needs a worker queue (Part 7). The orchestrator is already
+  HTTP-independent.
+* GPU inference is implemented but has not been tested (no GPU was available). ONNX export is an optional
+  artifact; it isn't used for serving.
+* The Docker image does not include the CV extra (PyTorch is large). Build a CV image with `pip install ".[cv]"`
+  if you need it.
+* Ultralytics is AGPL-3.0 (see [Model / framework](#model--framework)).
 * Pipeline history is persisted after the run, not incrementally. A process crash mid-run would
   leave the inspection in `IMAGE_RECEIVED`.
 * `API_KEY` is a single shared key: a placeholder, not user authentication.

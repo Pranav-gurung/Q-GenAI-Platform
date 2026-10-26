@@ -29,8 +29,10 @@ FRONTEND_DIR = Path(__file__).resolve().parent.parent / "frontend"
 API_DESCRIPTION = f"""
 Computer-vision-first quality inspection pipeline for quick-commerce dark stores.
 
-**Part 1 (foundation):** all AI modules are placeholders that report `NOT_IMPLEMENTED`;
-no predictions are produced. Inspections without a real decision end in `REQUIRES_REVIEW`.
+**Modules** are selected by configuration (see `GET /api/health` for what is active and whether it can run):
+image quality gate (`basic`), computer vision (`yolov8`), decision rules (`rules`). Fulfillment analysis,
+RCA and corrective actions are placeholders that report `NOT_IMPLEMENTED`. CV reports visual evidence;
+PASS/FAIL/REVIEW comes from deterministic rules. Inspections without a real decision end in `REQUIRES_REVIEW`.
 
 **Pipeline states:** {", ".join(s.value for s in PipelineState)}
 

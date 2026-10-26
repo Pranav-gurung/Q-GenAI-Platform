@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from fastapi import APIRouter, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend import __version__
 from backend.db.session import check_connection
@@ -15,7 +15,9 @@ class HealthResponse(BaseModel):
     environment: str
     database: str  # ok | unavailable
     storage: str   # ok | unavailable
-    pipeline_modules: dict[str, dict]
+    pipeline_modules: dict[str, dict] = Field(description=(
+        "Per slot: name, implemented, and for artifact-backed modules (CV) also available, model_loaded, "
+        "model_version, device, error. A configured module that cannot run makes status 'degraded'."))
 
 
 @router.get("/health", response_model=HealthResponse, summary="Service health and module status")
@@ -23,9 +25,11 @@ def health(request: Request) -> HealthResponse:
     state = request.app.state
     db_ok = check_connection(state.engine)
     storage_ok = state.storage.healthy()
+    modules = state.orchestrator.modules.describe()
+    modules_ok = all(m.get("available", True) for m in modules.values())
     return HealthResponse(
-        status="ok" if db_ok and storage_ok else "degraded",
+        status="ok" if db_ok and storage_ok and modules_ok else "degraded",
         version=__version__, environment=state.settings.environment.value,
         database="ok" if db_ok else "unavailable", storage="ok" if storage_ok else "unavailable",
-        pipeline_modules=state.orchestrator.modules.describe(),
+        pipeline_modules=modules,
     )

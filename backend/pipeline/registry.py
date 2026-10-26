@@ -2,7 +2,8 @@
 
 To plug in a real module, add it to the matching registry below, e.g.
     CV_ENGINES["yolov8"] = lambda settings: YoloCVEngine(weights=settings.model_path / "best.onnx")
-Imports of heavy ML libraries should happen inside the factory so the API starts without them.
+Imports of heavy ML libraries happen inside the factory so the API starts without them
+(the `stub`, `basic` and `rules` implementations need no torch / ultralytics).
 """
 from __future__ import annotations
 
@@ -25,15 +26,30 @@ class PipelineModules:
     action_engine: ActionEngine
 
     def describe(self) -> dict[str, dict]:
-        return {slot: {"name": m.name, "implemented": m.implemented}
+        return {slot: {"name": m.name, "implemented": m.implemented, **m.health()}
                 for slot, m in vars(self).items() if isinstance(m, PipelineModule)}
 
 
 Factory = Callable[[Settings], PipelineModule]
 
-QUALITY_GATES: dict[str, Factory] = {"stub": lambda s: stubs.StubImageQualityGate()}
-CV_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubCVEngine()}
-DECISION_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubDecisionEngine()}
+def _basic_quality_gate(settings: Settings) -> PipelineModule:
+    from ml.cv.quality import BasicImageQualityGate
+    return BasicImageQualityGate(settings)
+
+
+def _yolov8_engine(settings: Settings) -> PipelineModule:
+    from ml.cv.yolo_engine import YoloCVEngine  # never raises for a missing model; reports UNAVAILABLE
+    return YoloCVEngine(settings)
+
+
+def _rules_decision(settings: Settings) -> PipelineModule:
+    from backend.pipeline.decision_rules import RulesDecisionEngine
+    return RulesDecisionEngine(settings)
+
+
+QUALITY_GATES: dict[str, Factory] = {"stub": lambda s: stubs.StubImageQualityGate(), "basic": _basic_quality_gate}
+CV_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubCVEngine(), "yolov8": _yolov8_engine}
+DECISION_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubDecisionEngine(), "rules": _rules_decision}
 PIPELINE_ANALYZERS: dict[str, Factory] = {"stub": lambda s: stubs.StubPipelineAnalyzer()}
 RCA_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubRCAEngine()}
 ACTION_ENGINES: dict[str, Factory] = {"stub": lambda s: stubs.StubActionEngine()}
