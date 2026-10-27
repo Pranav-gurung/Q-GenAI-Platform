@@ -21,6 +21,8 @@ class HealthResponse(BaseModel):
     rag: dict = Field(description="RAG / SOP intelligence: enabled, embedding provider/model, vector store, documents, "
                                   "chunks, status (disabled | ready | unavailable) and error code. No document text or "
                                   "credentials.")
+    feedback: dict = Field(description="Operator feedback / learning loop: enabled, status (ready | unavailable), "
+                                       "learning mode. Automatic retraining and rule changes are not implemented.")
     pipeline_modules: dict[str, dict] = Field(description=(
         "Per slot: name, implemented, and for artifact-backed modules (CV) also available, model_loaded, "
         "model_version, device, error. A configured module that cannot run makes status 'degraded'."))
@@ -41,5 +43,7 @@ def health(request: Request) -> HealthResponse:
         database="ok" if db_ok else "unavailable", storage="ok" if storage_ok else "unavailable",
         llm=state.rca_service.health(),
         rag=rag.health(),
+        feedback={"enabled": True, "status": "ready" if db_ok else "unavailable", "learning_mode": "manual_review",
+                  "automatic_retraining": False, "automatic_rule_changes": False},
         pipeline_modules=modules,
     )

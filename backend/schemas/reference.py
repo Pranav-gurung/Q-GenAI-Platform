@@ -1,7 +1,7 @@
 """Reference data used to populate operator UIs."""
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict
 
 
 class StoreOut(BaseModel):
@@ -30,3 +30,5 @@ class ReferenceData(BaseModel):
     skus: list[SkuOut]
     stages: list[StageOut]
     pipeline_states: list[str]
+    defect_types: list[str] = Field(default_factory=list, description="Platform defect types (for review forms).")
+    decision_outcomes: list[str] = Field(default_factory=list, description="PASS / FAIL / REVIEW.")

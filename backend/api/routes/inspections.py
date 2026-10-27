@@ -98,7 +98,19 @@ async def upload_image(inspection_id: InspectionIdPath, service: Service,
 
 
 @router.post("/{inspection_id}/feedback", status_code=status.HTTP_201_CREATED, response_model=FeedbackRecord,
-             dependencies=[Depends(require_api_key)], summary="Submit operator feedback (active-learning input)")
+             dependencies=[Depends(require_api_key)], summary="Submit operator feedback / review of the AI result",
+             description="Operator verdict plus an optional structured review of each AI layer (decision, defects, "
+                         "first observed stage: correct?; RCA, actions: useful?). Corrections are stored NEXT TO a "
+                         "snapshot of the AI output; the AI result is never modified. Every submission is kept. "
+                         "Feedback is input for human-reviewed error analysis; nothing is retrained automatically.")
 def submit_feedback(inspection_id: InspectionIdPath, body: FeedbackCreate,
                     feedback: Annotated[FeedbackService, Depends(get_feedback_service)]) -> FeedbackRecord:
     return feedback_to_schema(feedback.submit(inspection_id, body))
+
+
+@router.get("/{inspection_id}/feedback", response_model=list[FeedbackRecord],
+            summary="All operator feedback for an inspection (oldest first)")
+def list_feedback(inspection_id: InspectionIdPath,
+                  feedback: Annotated[FeedbackService, Depends(get_feedback_service)]) -> list[FeedbackRecord]:
+    feedback.inspections.get(inspection_id)  # 404 for unknown inspections
+    return [feedback_to_schema(fb) for fb in feedback.list_for(inspection_id)]

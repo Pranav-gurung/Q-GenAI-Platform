@@ -9,6 +9,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.db.models import Sku, Store
+from backend.domain.enums import DecisionOutcome, DefectType
 from backend.domain.fulfillment import FULFILLMENT_FLOW, STAGE_DESCRIPTIONS
 from backend.pipeline.states import PipelineState
 from backend.schemas.reference import ReferenceData, SkuOut, StageOut, StoreOut
@@ -23,6 +24,7 @@ def get_reference_data(session: Session) -> ReferenceData:
         stages=[StageOut(stage=s.value, position=i, description=STAGE_DESCRIPTIONS[s])
                 for i, s in enumerate(FULFILLMENT_FLOW)],
         pipeline_states=[s.value for s in PipelineState],
+        defect_types=[d.value for d in DefectType], decision_outcomes=[o.value for o in DecisionOutcome],
     )
 
 

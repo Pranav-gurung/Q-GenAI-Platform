@@ -222,6 +222,111 @@ function renderRAG(rag) {
   document.getElementById("r-rag-disclaimer").textContent = rag.disclaimer;
 }
 
+// Operator Review (Part 6): structured feedback on each AI layer, stored next to (never over) the AI result.
+let REF = { defect_types: [], decision_outcomes: ["PASS", "FAIL", "REVIEW"], stages: [] };
+const STAGE_ORDER = ["RECEIVING", "STORAGE", "PICKING", "PACKING", "DISPATCH", "DELIVERY"];
+
+function aiStageFrom(pipeline) {  // mirrors the server snapshot: earliest first observed stage of this item's defects
+  const all = pipeline?.defect_analyses ?? [];
+  const here = all.filter(a => a.current_stage_status && a.current_stage_status !== "NOT_PRESENT");
+  const used = here.length ? here : all;
+  if (!used.length) return null;
+  const first = used.map(a => a.first_observed_stage).sort((a, b) => STAGE_ORDER.indexOf(a) - STAGE_ORDER.indexOf(b))[0];
+  return { stage: first, evidence: used.find(a => a.first_observed_stage === first)?.evidence_level };
+}
+
+function option(value, label = value) { const o = document.createElement("option"); o.value = value; o.textContent = label; return o; }
+
+function reviewRow(name, title, aiAvailable, choices, correction) {
+  const row = document.createElement("div"); row.className = "review-row"; row.dataset.name = name;
+  const t = document.createElement("span"); t.textContent = title; row.append(t);
+  if (!aiAvailable) {
+    row.append(Object.assign(document.createElement("span"), { className: "na", textContent: "not produced by the AI" }));
+    return row;
+  }
+  for (const [value, label] of choices) {
+    const l = document.createElement("label");
+    const r = Object.assign(document.createElement("input"), { type: "radio", name: `rv-${name}`, value });
+    l.append(r, document.createTextNode(label)); row.append(l);
+  }
+  if (correction) {
+    correction.hidden = true;
+    row.append(correction);
+    row.addEventListener("change", () => {
+      correction.hidden = row.querySelector(`input[name="rv-${name}"]:checked`)?.value !== "false";
+    });
+  }
+  return row;
+}
+
+function renderReview(insp, pipeline) {
+  const box = document.getElementById("r-review");
+  const result = insp.result;
+  if (!result || !["COMPLETED", "REQUIRES_REVIEW"].includes(insp.status)) { box.hidden = true; return; }
+  box.hidden = false;
+  const aiDecision = result.decision?.status === "COMPLETED" ? result.decision.outcome : null;
+  const aiDefects = result.cv?.status === "COMPLETED" ? [...new Set(result.cv.detections.map(d => d.defect_type))].sort() : null;
+  const aiStage = aiStageFrom(pipeline);
+  const rca = result.rca?.status === "COMPLETED" ? result.rca.root_cause_analysis : null;
+  const actions = result.action?.status === "COMPLETED" ? result.action.actions : [];
+  const dl = document.getElementById("r-review-ai"); dl.replaceChildren();
+  for (const [k, v] of [["Decision", aiDecision ?? "none (no automated decision)"],
+                        ["Defect", aiDefects ? (aiDefects.join(", ") || "none detected") : "no CV result"],
+                        ["First observed stage", aiStage ? `${aiStage.stage} (evidence ${aiStage.evidence})` : "none"],
+                        ["RCA / actions", rca ? `${rca.status}${rca.rag ? " · SOP " + rca.rag.status : ""} · ${actions.length} action(s)` : "none"]]) {
+    dl.append(Object.assign(document.createElement("dt"), { textContent: k }), Object.assign(document.createElement("dd"), { textContent: v }));
+  }
+  const ok = [["true", "Correct"], ["false", "Incorrect"]], useful = [["true", "Useful"], ["false", "Not useful"]];
+  const decisionSel = document.createElement("select"); decisionSel.name = "outcome";
+  REF.decision_outcomes.forEach(o => decisionSel.append(option(o)));
+  const defectSel = document.createElement("select"); defectSel.name = "defect";
+  defectSel.append(option("", "(no defect)")); REF.defect_types.forEach(d => defectSel.append(option(d)));
+  const stageSel = document.createElement("select"); stageSel.name = "stage";
+  STAGE_ORDER.forEach(st => stageSel.append(option(st)));
+  const rows = document.getElementById("review-rows"); rows.replaceChildren(
+    aiDecision ? reviewRow("decision", "Decision", true, ok, decisionSel)
+               : reviewRow("verdict", "Your verdict", true, [], decisionSel),
+    reviewRow("defect", "Defect", aiDefects !== null, ok, defectSel),
+    reviewRow("stage", "Pipeline attribution", aiStage !== null, ok, stageSel),
+    reviewRow("rca", "RCA", true, useful), reviewRow("action", "Recommended action", true, useful));
+  if (!aiDecision) decisionSel.hidden = false;
+  const formEl = document.getElementById("review-form");
+  formEl.review_operator.value = formEl.review_operator.value || form.operator_id.value.trim();
+  document.getElementById("r-review-status").textContent = "";
+  formEl.onsubmit = async (e) => {
+    e.preventDefault(); showError("");
+    const pick = n => { const v = formEl.querySelector(`input[name="rv-${n}"]:checked`)?.value; return v == null ? undefined : v === "true"; };
+    const body = { operator_id: formEl.review_operator.value.trim(), comment: formEl.review_comment.value.trim() || undefined,
+      decision_correct: pick("decision"), defect_correct: pick("defect"), stage_correct: pick("stage"),
+      rca_useful: pick("rca"), action_useful: pick("action") };
+    if (!aiDecision || body.decision_correct === false) body.outcome = decisionSel.value;
+    if (aiDecision && body.decision_correct === undefined) return showError("Please review the decision (Correct / Incorrect).");
+    if (body.defect_correct === false) body.defect_types = defectSel.value ? [defectSel.value] : [];
+    if (body.stage_correct === false) body.suspected_stage = stageSel.value;
+    const btn = formEl.querySelector("button"); btn.disabled = true;
+    try {
+      await api(`/inspections/${insp.inspection_id}/feedback`, { method: "POST",
+        headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+      document.getElementById("r-review-status").textContent = "Feedback recorded for future system improvement.";
+      renderReviewHistory(insp.inspection_id);
+    } catch (err) { showError(err.message); } finally { btn.disabled = false; }
+  };
+  renderReviewHistory(insp.inspection_id);
+}
+
+async function renderReviewHistory(inspectionId) {
+  const ul = document.getElementById("r-review-history");
+  const items = await api(`/inspections/${inspectionId}/feedback`).catch(() => []);
+  ul.replaceChildren(...items.map(fb => {
+    const li = document.createElement("li");
+    const fixes = fb.corrections.map(c => `${c.layer}: AI ${[].concat(c.ai_value ?? "none").join("+") || "none"} → operator ` +
+      `${[].concat(c.operator_value ?? "none").join("+") || "none"}`);
+    li.textContent = `${fb.created_at.slice(0, 19).replace("T", " ")} · ${fb.operator_id} · ${fb.outcome}` +
+      (fixes.length ? ` · ${fixes.join("; ")}` : " · no corrections") + (fb.comment ? ` · “${fb.comment}”` : "");
+    return li;
+  }));
+}
+
 function render(insp, file) {
   document.getElementById("result").hidden = false;
   document.getElementById("r-id").textContent = insp.inspection_id;
@@ -266,14 +371,17 @@ form.addEventListener("submit", async (e) => {
     render(created);
     renderFulfillment(null);
     document.getElementById("r-rca").hidden = true;
+    document.getElementById("r-review").hidden = true;
     const data = new FormData();
     data.append("file", form.image.files[0]);
     render(await api(`/inspections/${created.inspection_id}/image`, { method: "POST", body: data }), form.image.files[0]);
-    renderFulfillment(await api(`/inspections/${created.inspection_id}/pipeline`));
+    const pipeline = await api(`/inspections/${created.inspection_id}/pipeline`);
+    renderFulfillment(pipeline);
     const done = await api(`/inspections/${created.inspection_id}`);
     const snap = done.result?.rca;
     renderRCA(snap?.root_cause_analysis ?? (snap ? { status: snap.status === "UNAVAILABLE" ? "UNAVAILABLE" : "NOT_APPLICABLE",
       defects: [], generation: { error_code: (snap.message || "").split(":")[0] } } : null), created.inspection_id);
+    renderReview(done, pipeline);
   } catch (err) {
     showError(err.message);
   } finally {
@@ -282,6 +390,7 @@ form.addEventListener("submit", async (e) => {
 });
 
 api("/reference-data").then(ref => {
+  REF = ref;
   fill(form.store_id, ref.stores, s => s.store_id, s => `${s.name} (${s.store_id})`);
   fill(form.sku_id, ref.skus, s => s.sku_id, s => `${s.name} (${s.sku_id})`);
   fill(form.stage, ref.stages, s => s.stage, s => s.stage);
