@@ -13,7 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend import __version__
 from backend.api.errors import register_exception_handlers
-from backend.api.routes import feedback, health, inspections, reference
+from backend.api.routes import analytics, feedback, health, inspections, reference
 from backend.core.config import Settings, get_settings
 from backend.core.logging import configure_logging, request_id_var
 from backend.db.session import build_engine, build_session_factory
@@ -93,7 +93,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         return response
 
     register_exception_handlers(app)
-    for module in (health, reference, inspections, feedback):
+    for module in (health, reference, inspections, feedback, analytics):
         app.include_router(module.router, prefix=settings.api_prefix)
 
     if settings.serve_frontend and FRONTEND_DIR.is_dir():

@@ -391,8 +391,152 @@ form.addEventListener("submit", async (e) => {
 
 api("/reference-data").then(ref => {
   REF = ref;
+  const of = document.getElementById("ops-filters");
+  fill2(of.store_id, ref.stores, x => x.store_id, x => `${x.name} (${x.store_id})`);
+  fill2(of.sku_id, ref.skus, x => x.sku_id, x => `${x.name} (${x.sku_id})`);
   fill(form.store_id, ref.stores, s => s.store_id, s => `${s.name} (${s.store_id})`);
   fill(form.sku_id, ref.skus, s => s.sku_id, s => `${s.name} (${s.sku_id})`);
   fill(form.stage, ref.stages, s => s.stage, s => s.stage);
   if (!ref.stores.length || !ref.skus.length) showError("No stores/SKUs found. Run: python -m scripts.seed_sample_data");
 }).catch(err => showError("Could not load reference data: " + err.message));
+
+// ------------------------------------------------------------------------------------------------ Part 7
+// Operations Intelligence: renders /api/analytics/overview. Every number comes from the backend's deterministic
+// aggregation; this code only formats it. Null rates (zero denominators) are shown as "no data", never 0%.
+const pct = x => x == null ? "–" : `${Math.round(x * 1000) / 10}%`;
+const el = (tag, props = {}, ...kids) => { const e = Object.assign(document.createElement(tag), props); e.append(...kids); return e; };
+const tip = document.getElementById("ops-tip");
+function withTip(node, text) { node.dataset.tip = text; node.tabIndex = 0; return node; }
+document.addEventListener("pointermove", e => {
+  const t = e.target.closest?.("[data-tip]");
+  if (!t) { tip.hidden = true; return; }
+  tip.textContent = t.dataset.tip; tip.hidden = false;
+  tip.style.left = Math.min(e.clientX + 12, window.innerWidth - 270) + "px"; tip.style.top = (e.clientY + 12) + "px";
+});
+document.addEventListener("focusin", e => { if (e.target.dataset?.tip) { tip.textContent = e.target.dataset.tip; tip.hidden = false;
+  const r = e.target.getBoundingClientRect(); tip.style.left = r.left + "px"; tip.style.top = (r.bottom + 6) + "px"; } });
+document.addEventListener("focusout", () => { tip.hidden = true; });
+
+function kpi(label, value, sub) {
+  return el("div", { className: "kpi" }, el("div", { className: "k-label", textContent: label }),
+    el("div", { className: "k-value", textContent: value }), el("div", { className: "k-sub", textContent: sub }));
+}
+
+function barRows(container, rows, { max, label, value, sub, tipText, rate = false }) {
+  container.replaceChildren();
+  const top = rate ? 1 : Math.max(max ?? 0, ...rows.map(value), 1);
+  for (const r of rows) {
+    const v = value(r);
+    const track = el("div", { className: "bar-track" });
+    if (v != null) track.append(withTip(el("div", { className: "bar", style: `width:${Math.max(0, v) / top * 100}%` }), tipText(r)));
+    container.append(el("div", { className: "bar-label", textContent: label(r) }), track,
+      el("div", { className: "bar-value" }, rate ? pct(v) : String(v), el("small", { textContent: sub(r) })));
+  }
+}
+
+function renderOps(o) {
+  const body = document.getElementById("ops-body"), empty = document.getElementById("ops-empty");
+  const p = o.period;
+  document.getElementById("ops-period").textContent = p
+    ? `${p.start} → ${p.end} (${p.days} day${p.days === 1 ? "" : "s"}${p.defaulted ? ", default: latest data" : ""})` +
+      (o.demo_seed_inspections ? ` · includes ${o.demo_seed_inspections} SYNTHETIC demo inspections (not real store data)` : "")
+    : "";
+  const f = document.getElementById("ops-filters");
+  if (p && !f.start_date.value) { f.start_date.value = p.start; f.end_date.value = p.end; }
+  if (!o.has_data) {
+    body.hidden = true; empty.hidden = false;
+    empty.textContent = o.message ?? "No inspection data available for this period.";
+    return;
+  }
+  body.hidden = false; empty.hidden = true;
+  const i = o.inspections, fb = o.feedback;
+  document.getElementById("ops-kpis").replaceChildren(
+    kpi("Total inspections", String(i.total), `${i.decided} decided · ${i.image_rejected} image rejected · ${i.no_decision + i.pipeline_failed} undecided`),
+    kpi("Observed defect rate", pct(i.observed_defect_rate), `${i.defective} of ${i.decided} decided inspections`),
+    kpi("FAIL rate", pct(i.fail_rate), `${i.fail} FAIL · ${i.review} REVIEW · ${i.pass} PASS`),
+    kpi("Operator override rate", fb.decision_reviews ? pct(fb.decision_override_rate) : "no reviews",
+        fb.decision_reviews ? `${fb.decision_overrides} of ${fb.decision_reviews} reviewed decisions` : "no operator reviews in this period"));
+
+  const inv = document.getElementById("ops-investigate");
+  inv.replaceChildren(...(o.investigation ? [el("strong", { textContent: "Where to investigate first: " + o.investigation.headline }),
+    el("ul", {}, ...o.investigation.reasons.map(r => el("li", { textContent: r }))),
+    el("p", { className: "meta", textContent: o.investigation.caveat })] : [el("p", { className: "meta", textContent: "No defects observed in this period." })]));
+
+  barRows(document.getElementById("ops-defects"), o.defects.slice(0, 8), {
+    label: d => d.defect_type, value: d => d.unique_defects,
+    sub: d => `${pct(d.share_of_unique)} · most at ${d.most_common_first_stage ?? "–"}`,
+    tipText: d => `${d.defect_type}\n${d.unique_defects} unique defects (${pct(d.share_of_unique)})\n${d.observations} inspection observations\nMost common first observed stage: ${d.most_common_first_stage ?? "–"}` });
+  barRows(document.getElementById("ops-hotspots"), o.hotspots, {
+    label: h => `${h.rank}. ${h.stage}`, value: h => h.first_observed_defects,
+    sub: h => `${pct(h.share)} · stage defect rate ${pct(h.observed_defect_rate)}`,
+    tipText: h => `${h.stage}\n${h.first_observed_defects} unique defects first observed here\nEvidence: ${Object.entries(h.evidence_levels).map(([k, v]) => `${k} ${v}`).join(", ")}\nTop defect: ${h.top_defect_type ?? "–"}` });
+
+  const t = o.trends, trend = document.getElementById("ops-trend");
+  const maxD = Math.max(1, ...t.buckets.map(b => b.defective_inspections));
+  trend.replaceChildren(...t.buckets.map(b => {
+    const col = el("div", { className: "col" + (b.inspections ? "" : " empty") });
+    col.append(withTip(el("div", { className: "bar", style: `height:${b.defective_inspections / maxD * 100}%; min-height:${b.inspections ? 2 : 0}px` }),
+      `${t.granularity === "week" ? "Week of " : ""}${b.start}\n${b.defective_inspections} inspections with observed defects\n${b.inspections} decided inspections\nObserved defect rate: ${b.inspections ? pct(b.observed_defect_rate) : "no data"}`));
+    return col;
+  }));
+  trend.after(trend.nextElementSibling?.classList.contains("trend-axis") ? trend.nextElementSibling : el("div", { className: "trend-axis" }));
+  trend.nextElementSibling.replaceChildren(el("span", { textContent: t.buckets[0]?.start ?? "" }), el("span", { textContent: t.buckets.at(-1)?.start ?? "" }));
+  document.getElementById("ops-trend-meta").textContent = `Inspections with ≥ 1 observed defect per ${t.granularity}; max ${maxD}. Hover a bar for the rate.`;
+  document.getElementById("ops-trend-statement").textContent = t.direction.statement;
+
+  const m = document.getElementById("ops-matrix");
+  const maxCell = Math.max(1, ...o.matrix.rows.flatMap(r => Object.values(r.counts).filter(v => v != null)));
+  m.replaceChildren(el("thead", {}, el("tr", {}, el("th", { textContent: "Defect" }), ...o.matrix.stages.map(s => el("th", { textContent: s })), el("th", { textContent: "Total" }))),
+    el("tbody", {}, ...o.matrix.rows.map(r => el("tr", {}, el("td", { textContent: r.defect_type }), ...o.matrix.stages.map(s => {
+      const v = r.counts[s];
+      if (v == null) return withTip(el("td", { className: "na", textContent: "–" }), `${s}: not inspected in this period`);
+      const share = v / maxCell, td = el("td", { textContent: String(v) });
+      if (v) td.style.background = `color-mix(in srgb, var(--accent) ${Math.round(12 + share * 70)}%, transparent)`;
+      if (share > .55) td.style.color = "var(--accent-text)";
+      return withTip(td, `${r.defect_type} first observed at ${s}: ${v}`);
+    }), el("td", { textContent: String(r.total) })))));
+
+  const fbRows = [["Decision overrides", fb.decision_override_rate, fb.decision_overrides, fb.decision_reviews, "reviewed decisions"],
+    ["Defect corrections", fb.defect_correction_rate, fb.defect_corrections, fb.defect_reviews, "defect reviews"],
+    ["Stage corrections", fb.stage_correction_rate, fb.stage_corrections, fb.stage_reviews, "stage reviews"],
+    ["RCA useful", fb.rca.useful_rate, fb.rca.useful, fb.rca.rated, "RCA ratings"],
+    ["Actions useful", fb.actions.useful_rate, fb.actions.useful, fb.actions.rated, "action ratings"],
+    ["SOP-grounded actions useful", fb.sop_grounded_actions.useful_rate, fb.sop_grounded_actions.useful, fb.sop_grounded_actions.rated, "ratings of SOP-grounded actions"]];
+  barRows(document.getElementById("ops-feedback"), fbRows, { rate: true, label: r => r[0], value: r => r[3] ? r[1] : null,
+    sub: r => r[3] ? `${r[2]} of ${r[3]}` : "no data", tipText: r => `${r[0]}: ${r[2]} of ${r[3]} ${r[4]} (${pct(r[1])})` });
+
+  const groupTable = (id, rows, title) => document.getElementById(id).replaceChildren(
+    el("thead", {}, el("tr", {}, ...[title, "Inspections", "Observed defect rate", "FAIL rate", "Unique defects", "Top defect"].map(h => el("th", { textContent: h })))),
+    el("tbody", {}, ...rows.map(g => el("tr", {}, withTip(el("td", { textContent: g.name ? `${g.name}` : g.key }), `${g.key}${g.category ? " · " + g.category : ""}`),
+      el("td", { textContent: String(g.inspections) }), el("td", { textContent: pct(g.observed_defect_rate) }),
+      el("td", { textContent: pct(g.fail_rate) }), el("td", { textContent: String(g.unique_defects) }),
+      el("td", { textContent: g.top_defect_type ?? "–" })))));
+  groupTable("ops-stores", o.stores, "Store");
+  groupTable("ops-skus", o.skus, "SKU");
+  document.getElementById("ops-defs").replaceChildren(...Object.entries(o.definitions).flatMap(([k, v]) =>
+    [el("dt", { textContent: k.replaceAll("_", " ") }), el("dd", { textContent: v })]));
+  document.getElementById("ops-disclaimer").textContent = o.disclaimer;
+}
+
+async function loadOps() {
+  const f = document.getElementById("ops-filters"), q = new URLSearchParams();
+  for (const k of ["start_date", "end_date", "store_id", "sku_id", "granularity"]) if (f[k].value) q.set(k, f[k].value);
+  const box = document.getElementById("ops-error");
+  box.hidden = true;
+  try { renderOps(await api(`/analytics/overview?${q}`)); } catch (err) { box.textContent = err.message; box.hidden = false; }
+}
+
+document.getElementById("ops-filters").addEventListener("submit", e => { e.preventDefault(); loadOps(); });
+let opsLoaded = false;
+for (const tab of document.querySelectorAll(".tab")) tab.addEventListener("click", () => {
+  const ops = tab.dataset.view === "ops";
+  document.querySelectorAll(".tab").forEach(t => t.setAttribute("aria-pressed", String(t === tab)));
+  form.hidden = ops;
+  document.getElementById("result").classList.toggle("view-hidden", ops);
+  document.getElementById("ops").hidden = !ops;
+  if (ops && !opsLoaded) { opsLoaded = true; loadOps(); }
+});
+
+function fill2(select, items, value, label) {  // keeps the existing "All ..." option
+  for (const it of items) select.append(option(value(it), label(it)));
+}

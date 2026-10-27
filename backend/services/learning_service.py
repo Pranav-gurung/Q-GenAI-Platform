@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from datetime import datetime
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -24,6 +25,8 @@ from backend.services.mappers import feedback_corrections
 class FeedbackFilters:
     store_id: str | None = None
     sku_id: str | None = None
+    created_from: datetime | None = None   # inspection created_at >= (Part 7 analytics period)
+    created_before: datetime | None = None  # inspection created_at <
 
 
 def _value(x):
@@ -42,6 +45,10 @@ class LearningService:
             q = q.where(Inspection.store_id == filters.store_id)
         if filters.sku_id:
             q = q.where(Inspection.sku_id == filters.sku_id)
+        if filters.created_from:
+            q = q.where(Inspection.created_at >= filters.created_from)
+        if filters.created_before:
+            q = q.where(Inspection.created_at < filters.created_before)
         rows = list(self.session.scalars(q))
         latest = {fb.inspection_id: fb for fb in rows}  # ascending -> last wins
         return sorted(latest.values(), key=lambda f: (f.created_at, f.feedback_id)), len(rows)
@@ -51,7 +58,7 @@ class LearningService:
         latest, submissions = self._latest(filters)
         decisions = _Breakdown()
         defects, stages = _Breakdown(), _Breakdown()
-        rca, actions = _Usefulness(), _Usefulness()
+        rca, actions, sop_actions = _Usefulness(), _Usefulness(), _Usefulness()
         for fb in latest:
             if fb.system_outcome is not None:
                 decisions.add([_value(fb.system_outcome)], not fb.is_correction,
@@ -65,10 +72,13 @@ class LearningService:
                            f"{_value(fb.ai_stage)} -> {_value(fb.suspected_stage)}")
             rca.add(fb.rca_useful)
             actions.add(fb.action_useful)
+            if ((fb.ai_snapshot or {}).get("rag") or {}).get("status") == "GROUNDED":
+                sop_actions.add(fb.action_useful)  # actions the operator saw were SOP-grounded (Part 5)
         return FeedbackAnalysis(
             generated_at=utcnow(), feedback_submissions=submissions, inspections_reviewed=len(latest),
             decisions=decisions.stats(), defects=defects.stats(), stages=stages.stats(), rca=rca.stats(),
-            actions=actions.stats(), learning_status=dict(Counter(_value(fb.learning_status) for fb in latest)))
+            actions=actions.stats(), sop_grounded_actions=sop_actions.stats(),
+            learning_status=dict(Counter(_value(fb.learning_status) for fb in latest)))
 
     # ------------------------------------------------------------------------------------------------ export
     def candidates(self, filters: FeedbackFilters = FeedbackFilters(), *, corrections_only: bool = False,

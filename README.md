@@ -2,13 +2,14 @@
 
 **Computer-vision-first quality intelligence for quick-commerce dark stores.**
 
-> **Status: Part 6 of 7, Operator Feedback & Learning Loop** (on top of Parts 1-5: foundation + pipeline,
-> computer vision, fulfillment pipeline intelligence, GenAI RCA, RAG / SOP). Implemented: inspection pipeline, API, database, operator
+> **Status: Part 7 of 8, Operations Intelligence** (on top of Parts 1-6: foundation + pipeline, computer vision,
+> fulfillment pipeline intelligence, GenAI RCA, RAG / SOP, operator feedback). Implemented: inspection pipeline, API, database, operator
 > UI, an image quality gate, a **real YOLOv8 CV engine**, deterministic decision rules, dataset / training /
 > evaluation tooling, **deterministic first-defect stage attribution**, an **evidence-grounded GenAI RCA** that
 > only adds labelled hypotheses, actions and checks, and **SOP-grounded corrective actions** retrieved from a
 > DEMO / SYNTHETIC knowledge base with citations, plus a **structured operator review** of every AI layer with
-> deterministic error analysis and learning-candidate export.
+> deterministic error analysis and learning-candidate export, and a deterministic **operations analytics**
+> dashboard (quality metrics, observed hotspots, trends, feedback quality).
 > **The only trained model is a demo model trained on SYNTHETIC data.** It proves the engineering end to end.
 > It is **not** evidence of accuracy on real product photos (see [Computer Vision](#computer-vision-part-2)).
 > The SOP knowledge base is demo content, not any company's real SOPs. Feedback never retrains or changes anything
@@ -93,7 +94,12 @@ a **PipelineOrchestrator**. Each AI capability is a plug-in module behind a type
                 ┌─────────────────┐
                 │ Learning loop   │   error analysis + candidate export (Part 6 ✅); retraining = human decision
                 └────────┬────────┘
-                         └──────────► CV MODEL
+                         ├──────────► CV MODEL (only via a human-curated dataset + new model version)
+                         ▼
+                ┌─────────────────┐
+                │ Operations      │   GET /analytics/overview + dashboard (Part 7 ✅): deterministic
+                │ Intelligence    │   aggregation, observed hotspots, trends; read-only, not causal
+                └─────────────────┘
 ```
 
 ## What is implemented
@@ -127,9 +133,11 @@ a **PipelineOrchestrator**. Each AI capability is a plug-in module behind a type
 | **Part 4:** Evidence-grounded GenAI RCA (`RCA_ENGINE=genai`, `ACTION_ENGINE=rca`), LLM provider abstraction (Anthropic + mock), guardrails, `GET /api/inspections/{id}/rca`, UI panel | ✅ | `backend/rca/`, `backend/services/rca_service.py` |
 | **Part 5:** RAG / SOP intelligence (`RAG_ENABLED`): demo SOP knowledge base, ingestion + validation, section chunking, embeddings, local vector index, retrieval, cited SOP-grounded actions, citation guardrails, health, UI | ✅ | `knowledge/`, `backend/rag/`, `backend/schemas/rag.py` |
 | **Part 6:** Operator feedback & learning loop: structured review (decision / defect / stage correct?, RCA / action useful?), AI snapshot next to corrections, `GET /feedback`, error analysis, learning-candidate export, UI Operator Review | ✅ | `backend/services/feedback_service.py`, `learning_service.py`, `backend/api/routes/feedback.py`, migration `0003` |
+| **Part 7:** Operations intelligence: `GET /api/analytics/overview` (outcomes, observed defect / FAIL rates, top issues, stage hotspots, defect × stage matrix, stores / SKUs / categories, daily / weekly trends, feedback quality, investigation priority), dashboard tab, synthetic demo seed | ✅ | `backend/services/analytics_service.py`, `backend/api/routes/analytics.py`, `scripts/seed_demo_operations.py` |
 
 **Not implemented yet (by design):** a vector database (a local numpy index is enough here), real approved SOPs,
-automatic retraining / active-learning infrastructure (deliberately), analytics dashboards, user accounts / RBAC. Also not implemented: any model trained
+automatic retraining / active-learning infrastructure (deliberately), forecasting / predictive analytics
+(deliberately), user accounts / RBAC. Also not implemented: any model trained
 on real product photos.
 
 ### Honest placeholders: "no result" is never a fake result
@@ -162,7 +170,7 @@ q-genai/
 ├── data/                     raw/ processed/ feedback/ cv/ (git-ignored), samples/ (simulated data)
 ├── artifacts/cv/             trained model versions (git-ignored)
 ├── knowledge/                DEMO / SYNTHETIC SOP knowledge base for RAG (Part 5)
-├── scripts/                  seed_sample_data.py, smoke_test.sh
+├── scripts/                  seed_sample_data.py, seed_demo_operations.py, export_learning_candidates.py, smoke_test.sh
 ├── docker/                   Dockerfile, entrypoint (migrate → seed → serve)
 └── tests/                    unit/ api/ integration/ cv/
 ```
@@ -1032,6 +1040,107 @@ operator corrections. It never claims the AI has learned.
 `GET /api/health` → `feedback: {enabled, status: ready|unavailable, learning_mode: "manual_review",
 automatic_retraining: false, automatic_rule_changes: false}`.
 
+## Operations Intelligence (Part 7)
+
+Turns individual inspections into operational visibility for a dark-store manager:
+- what is failing and where it is first seen;
+- which stores and SKUs are most affected;
+- how the AI is performing against operator reviews;
+- where to look first.
+
+It is a **deterministic aggregation layer**. It is not a predictive model, forecast or causal-inference engine,
+and it never modifies CV, rules, attribution, RCA, RAG or feedback. A test checks that the endpoint is read-only.
+No LLM computes or summarises any number; every value on the dashboard comes from backend code.
+
+> **Analytics describe observed inspection patterns and should not be interpreted as causal proof.**
+
+### One endpoint: `GET /api/analytics/overview`
+
+Query parameters (all optional, validated):
+
+| Parameter | Meaning |
+|---|---|
+| `start_date`, `end_date` | `YYYY-MM-DD`, UTC, inclusive. Default: up to 30 days ending at the latest inspection, starting at the first inspection in that window. Max 366 days; `start > end` → `422 INVALID_DATE_RANGE`. |
+| `store_id`, `sku_id` | Exact ids (same pattern as the rest of the API; anything else → 422). A valid but unknown id returns an empty result. |
+| `granularity` | `day` or `week` (ISO weeks, Monday). Default: `day` up to 31 days, else `week`. |
+
+The response holds:
+- `inspections` (outcome counts and rates);
+- `defects` (top observed quality issues);
+- `stages`, `hotspots` and the defect × stage `matrix`;
+- `stores`, `skus` and `categories`;
+- `trends`;
+- `feedback` (Part 6 quality metrics);
+- `investigation`;
+- `definitions` (the text of every denominator) and the `disclaimer`.
+
+### Definitions (every rate names its denominator)
+
+| Metric | Definition |
+|---|---|
+| Inspection outcome | Part 3 rule: latest operator verdict, else the automated rules decision → `PASS / FAIL / REVIEW`. Without either: `IMAGE_REJECTED` (quality gate), `PIPELINE_FAILED` or `NO_DECISION`. In-flight inspections are counted as `in_progress` and excluded from every rate. |
+| **FAIL rate** | FAIL / decided (PASS + FAIL + REVIEW). REVIEW stays in the denominator; rejected and undecided inspections are excluded. |
+| **Observed defect rate** | Decided inspections with ≥ 1 observed defect / decided inspections. Observed defects are the operator's defect types when given, else the CV detections. This is a rate **among inspected items**, not a defect rate of all orders or all stock. |
+| Defect observations | (inspection, defect type) pairs; a leak seen at PACKING and DISPATCH counts twice. |
+| Unique defects | (item trace, defect type) pairs from the Part 3 analysis, counted once at the **first observed stage**: the first stage where the defect appears based on available inspection evidence in the period. |
+| **Observed quality hotspots** | Stages ranked by unique defects first observed there (ties: the stage's observed defect rate, then flow order), with the Part 3 evidence level of those observations. |
+| Defect × stage matrix | Unique defects per (type, first observed stage). Only observed defect types are listed. A cell is `null` ("–") when the stage had no decided inspection in the period: *not inspected*, which is different from 0. |
+| Stores / SKUs / categories | Decided inspections, FAIL rate, observed defect rate, unique defects, top defect type (SKU category from reference data). |
+| Trend | Per day/week: decided inspections, inspections with observed defects, rate (null for empty buckets). Direction compares the first and second half of the buckets that have data; a change under 5 percentage points is "stable". Statements read "the observed defect rate increased", never "X caused it". |
+| Feedback metrics | Latest Part 6 review per inspection, in the period: decision overrides / decisions reviewed, defect corrections / defect reviews, stage corrections / stage reviews (also by AI stage), RCA useful / RCA rated, actions useful / actions rated, and **SOP-grounded actions useful** / ratings on inspections whose actions were SOP-grounded (RAG `GROUNDED`). |
+| Investigation priority | Deliberately a simple ranking, not a score: the top hotspot, with its reasons (volume and share, top defect, stage rate, evidence strength) and a warning when operators corrected attributions pointing at that stage. Phrased as *"PACKING is the highest observed quality hotspot and should be investigated first"*, never as a root cause. |
+
+A rate whose denominator is zero is `null` (shown as "no data"), never 0 and never NaN.
+
+**How it is computed.**
+- The period bounds, in-flight counts and reference names are SQL aggregates.
+- Per-inspection data is fetched as plain columns with three parameterised SQLAlchemy queries (inspections with
+  decision/CV/quality JSON, latest image, latest feedback). These are aggregated in one pass using the existing
+  Part 3 functions (`build_observation`, `analyze_trace`) and the Part 6 `LearningService`, so the semantics are
+  identical to the per-inspection views.
+- Defects live inside JSON result documents, so a portable SQLite + PostgreSQL pure-SQL version would duplicate
+  that logic; the 366-day cap bounds the scan.
+- No pandas, no analytics database, no materialized views, no migration.
+
+### Dashboard
+
+The **Operations Intelligence** tab in the existing UI has:
+- filters: dates, store, SKU, daily/weekly;
+- KPI tiles: total inspections, observed defect rate, FAIL rate, operator override rate, each with its numerator
+  and denominator;
+- the "where to investigate first" callout;
+- top observed quality issues and observed quality hotspots (bars);
+- observed defects over time (columns, with the trend statement);
+- the defect × first-observed-stage matrix;
+- operator feedback quality (rates with "x of y");
+- store and SKU tables, and the metric definitions.
+
+Every bar and cell has a hover/focus tooltip with the underlying counts. Empty periods show *"No inspection data
+available for this period."* instead of zeros. The period line says how many inspections are SYNTHETIC demo data.
+
+### Synthetic demo dataset
+
+```bash
+CV_ENGINE=yolov8 QUALITY_GATE_ENGINE=basic DECISION_ENGINE=rules DECISION_AUTO_PASS=true \
+PIPELINE_ANALYSIS_ENGINE=deterministic python -m scripts.seed_demo_operations   # optionally with RCA / RAG enabled
+```
+
+This seeds 28 scripted items (102 inspections, 4 sample stores, 10 sample SKUs, 14 days ending 2026-10-18):
+- **Pipeline:** each inspection goes through the configured pipeline, using images from the **synthetic** CV
+  dataset with the demo YOLO model.
+- **Reviews:** 22 scripted operator reviews are submitted through the Part 6 service, including confirmations, 3
+  stage corrections and 2 decision overrides.
+- **Timestamps:** only these are moved afterwards, to fixed days.
+- **Marking and re-runs:** rows are marked `metadata.demo_seed`, and the script refuses to run twice.
+
+This is **not real store or customer data**. With the demo model, the dashboard shows LEAKING_PACKAGE as the top
+issue and PACKING as the top hotspot, because that is what the script stages. The numbers are an output of the
+pipeline, not hard-coded.
+
+### Health
+
+`GET /api/health` → `analytics: {enabled, status: ready|unavailable, mode: "deterministic"}`.
+
 ## Local setup
 
 Requirements: Python 3.11+, and either PostgreSQL 14+ or nothing (SQLite fallback). Docker is optional.
@@ -1138,6 +1247,7 @@ All endpoints are under `/api`. Interactive docs with request/response/error sch
 | GET | `/api/inspections/{id}/feedback` | Every feedback submission for the inspection (oldest first) |
 | GET | `/api/feedback/analysis` | Error analysis: overrides, defect / stage corrections, RCA / action usefulness |
 | GET | `/api/feedback/learning-candidates` | AI vs operator values per reviewed inspection, for human curation |
+| GET | `/api/analytics/overview` | Operations intelligence: outcome counts and rates, top issues, stage hotspots, defect × stage matrix, stores / SKUs, trends, feedback quality (filters: dates, store, SKU, granularity) |
 
 ```bash
 curl -X POST localhost:8000/api/inspections -H 'content-type: application/json' \
@@ -1220,6 +1330,17 @@ Alembic migrations, and a full persisted lifecycle.
 quote guardrails, prompt-injection delimiting, every fallback, the API / health / pipeline routing, and the
 canonical demo (operator-feedback path and real YOLO inference).
 
+**Analytics tests** (`tests/analytics/`) run a scripted dataset through the real pipeline and check hand-derived
+numbers:
+* outcome counts and rates, defects by type and severity, stage metrics, hotspots and the matrix (including
+  "not inspected" cells);
+* store / SKU / category metrics, store / SKU / date filters, daily / weekly trends, gap days, the default period
+  and empty periods;
+* every feedback rate, including zero denominators;
+* rejected / undecided / in-progress exclusion;
+* invalid dates and ranges, SQL-injection-shaped ids, read-only behaviour and health;
+* the synthetic demo seed with the real YOLO model.
+
 **Feedback tests** (`tests/feedback/`) cover:
 * each review layer (correct and corrected) and RCA / action usefulness;
 * invalid enums, internal fields, inconsistent reviews and reviews of layers the AI did not produce;
@@ -1239,8 +1360,9 @@ canonical demo (operator-feedback path and real YOLO inference).
 | 3 | Fulfillment Pipeline Intelligence (stage history, first-defect attribution, evidence levels) | ✅ |
 | 4 | GenAI Root-Cause Analysis (grounded hypotheses, corrective actions, safe fallback) | ✅ |
 | 5 | RAG / SOP Intelligence (demo SOP knowledge base, retrieval, cited SOP-grounded actions) | ✅ (demo SOPs only) |
-| **6** | Operator Feedback & Learning Loop (structured review, error analysis, candidate export; no automatic retraining) | ✅ this commit |
-| 7 | Minimal security + production hardening (operator auth/roles, async workers, object storage) | planned |
+| 6 | Operator Feedback & Learning Loop (structured review, error analysis, candidate export; no automatic retraining) | ✅ |
+| **7** | Operations Intelligence (deterministic quality analytics, observed hotspots, trends, feedback quality, dashboard) | ✅ this commit |
+| 8 | Minimal security + production hardening (operator auth/roles, async workers, object storage) | planned |
 | later | Image Quality Gate, advanced (glare, framing/occlusion, product-in-frame, retake UX) | planned |
 
 ## Known limitations
@@ -1248,6 +1370,15 @@ canonical demo (operator-feedback path and real YOLO inference).
 * **No real-world model.** The only trained model learned from synthetic cartoon scenes. Expect it to perform
   poorly on real photos until it is retrained on a real annotated dataset. Its metrics are demo metrics.
 * 5 of 10 taxonomy classes have no data at all (`placeholder`), and `wrong_item` needs SKU reference matching.
+* Operations analytics:
+  * **analytics describe observed inspection patterns and should not be interpreted as causal proof**: a hotspot
+    is where defects were first *observed*, and depends on which stages were inspected;
+  * the observed defect rate is a rate among inspected items, not the true defect rate of all orders or stock;
+  * the demo dashboard data is SYNTHETIC (synthetic images, a demo model, scripted reviews), not real store or
+    customer data;
+  * there is no forecasting, predictive model, automatic retraining or autonomous operational decision;
+  * per-inspection data is aggregated in the application (bounded to 366 days); very large deployments would
+    need pre-aggregation.
 * Operator feedback:
   * there is no automatic retraining or rule change: improvements need a person to curate candidates and decide;
   * candidates are not a training set: labels are single-operator, unverified, and may disagree between operators

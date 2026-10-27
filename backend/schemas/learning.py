@@ -55,6 +55,8 @@ class FeedbackAnalysis(BaseModel):
     stages: BreakdownStats = Field(description="stage_correct reviews, by AI first observed stage.")
     rca: UsefulnessStats
     actions: UsefulnessStats
+    sop_grounded_actions: UsefulnessStats = Field(default_factory=UsefulnessStats, description=(
+        "action_useful ratings on inspections whose actions were SOP-grounded (RAG status GROUNDED)."))
     learning_status: dict[str, int]
     learning_loop: LearningLoopStatus = Field(default_factory=LearningLoopStatus)
 

@@ -10,6 +10,10 @@
   <header>
     <h1>Q-GenAI <span>Dark-store inspection</span></h1>
     <p class="note">Computer vision reports visual evidence; the decision comes from deterministic rules. Modules that are not configured or not available say so; nothing is guessed.</p>
+    <nav class="tabs" aria-label="Views">
+      <button type="button" class="tab" data-view="inspect" aria-pressed="true">Inspect</button>
+      <button type="button" class="tab" data-view="ops" aria-pressed="false">Operations Intelligence</button>
+    </nav>
   </header>
 
   <main>
@@ -80,6 +84,45 @@
       </div>
       <h3>Pipeline stages</h3>
       <ol id="r-stages"></ol>
+    </section>
+    <section id="ops" class="ops" hidden aria-live="polite">
+      <h2>Operations Intelligence <span class="meta">observed inspection patterns</span></h2>
+      <form id="ops-filters" class="ops-filters" novalidate>
+        <label>From <input type="date" name="start_date"></label>
+        <label>To <input type="date" name="end_date"></label>
+        <label>Store <select name="store_id"><option value="">All stores</option></select></label>
+        <label>SKU <select name="sku_id"><option value="">All SKUs</option></select></label>
+        <label>Trend <select name="granularity"><option value="">Auto</option><option value="day">Daily</option>
+          <option value="week">Weekly</option></select></label>
+        <button type="submit">Apply</button>
+      </form>
+      <div id="ops-error" class="error" role="alert" hidden></div>
+      <p id="ops-period" class="meta"></p>
+      <p id="ops-empty" class="ops-empty" hidden></p>
+      <div id="ops-body" hidden>
+        <div class="kpis" id="ops-kpis"></div>
+        <div id="ops-investigate" class="investigate"></div>
+        <div class="ops-grid">
+          <div class="panel"><h3>Top observed quality issues</h3><p class="meta">Unique defects per item, by type</p>
+            <div id="ops-defects" class="bars"></div></div>
+          <div class="panel"><h3>Observed quality hotspots</h3><p class="meta">Unique defects by first observed stage</p>
+            <div id="ops-hotspots" class="bars"></div></div>
+        </div>
+        <div class="panel"><h3>Observed defects over time</h3>
+          <p class="meta" id="ops-trend-meta"></p><div id="ops-trend" class="trend"></div>
+          <p class="meta" id="ops-trend-statement"></p></div>
+        <div class="panel"><h3>Defect × first observed stage</h3>
+          <p class="meta">Unique defects. “–” = no decided inspection at that stage in the period (not inspected).</p>
+          <div class="table-wrap"><table id="ops-matrix" class="matrix"></table></div></div>
+        <div class="panel"><h3>Operator feedback quality</h3><p class="meta">Latest review per inspection</p>
+          <div id="ops-feedback" class="bars pct"></div></div>
+        <div class="panel"><h3>Stores</h3><p class="meta">Observed rates among inspected items, not all orders</p>
+          <div class="table-wrap"><table id="ops-stores"></table></div></div>
+        <div class="panel"><h3>SKUs</h3><div class="table-wrap"><table id="ops-skus"></table></div></div>
+        <details class="panel"><summary>Metric definitions</summary><dl id="ops-defs" class="defs"></dl></details>
+        <p class="meta disclaimer" id="ops-disclaimer"></p>
+      </div>
+      <div id="ops-tip" class="tip" role="tooltip" hidden></div>
     </section>
   </main>
   <script src="app.js"></script>

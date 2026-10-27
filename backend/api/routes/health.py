@@ -23,6 +23,8 @@ class HealthResponse(BaseModel):
                                   "credentials.")
     feedback: dict = Field(description="Operator feedback / learning loop: enabled, status (ready | unavailable), "
                                        "learning mode. Automatic retraining and rule changes are not implemented.")
+    analytics: dict = Field(description="Operations intelligence: enabled, status (ready | unavailable), mode "
+                                        "(deterministic aggregation; no predictive model, no LLM-computed numbers).")
     pipeline_modules: dict[str, dict] = Field(description=(
         "Per slot: name, implemented, and for artifact-backed modules (CV) also available, model_loaded, "
         "model_version, device, error. A configured module that cannot run makes status 'degraded'."))
@@ -45,5 +47,6 @@ def health(request: Request) -> HealthResponse:
         rag=rag.health(),
         feedback={"enabled": True, "status": "ready" if db_ok else "unavailable", "learning_mode": "manual_review",
                   "automatic_retraining": False, "automatic_rule_changes": False},
+        analytics={"enabled": True, "status": "ready" if db_ok else "unavailable", "mode": "deterministic"},
         pipeline_modules=modules,
     )

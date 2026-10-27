@@ -6,6 +6,7 @@ from fastapi import Depends, Request
 from sqlalchemy.orm import Session
 
 from backend.core.config import Settings
+from backend.services.analytics_service import AnalyticsService
 from backend.services.feedback_service import FeedbackService
 from backend.services.inspection_service import InspectionService
 from backend.services.learning_service import LearningService
@@ -35,3 +36,7 @@ def get_feedback_service(db: Session = Depends(get_db),
 
 def get_learning_service(db: Session = Depends(get_db)) -> LearningService:
     return LearningService(db)
+
+
+def get_analytics_service(db: Session = Depends(get_db)) -> AnalyticsService:
+    return AnalyticsService(db)
