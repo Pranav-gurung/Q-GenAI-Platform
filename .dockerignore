@@ -13,3 +13,8 @@ artifacts
 runs
 *.pt
 *.onnx
+**/*.pyc
+*.log
+.mypy_cache
+.ruff_cache
+scripts/__pycache__

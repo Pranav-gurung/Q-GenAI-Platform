@@ -10,7 +10,8 @@ misses a defect, the dashboard shows that.
 
 Run with CV_ENGINE=yolov8 and a trained demo model for meaningful results (see README "Computer Vision").
 Inspections are marked metadata.demo_seed and item ids start with DEMO-OPS-; the dashboard reports how many it
-includes. Refuses to run twice on the same database.
+includes. Refuses to run twice on the same database, and refuses ENVIRONMENT=production (synthetic data must never
+be mixed into a real deployment). It only inserts; it never deletes or resets anything.
 """
 from __future__ import annotations
 
@@ -20,6 +21,7 @@ from itertools import cycle
 from pathlib import Path
 
 from sqlalchemy import select, update
+from sqlalchemy.engine import make_url
 
 from backend.core.config import get_settings
 from backend.core.exceptions import AppError
@@ -103,6 +105,10 @@ def main(argv: list[str] | None = None) -> int:
     args = p.parse_args(argv)
     settings = get_settings()
     configure_logging("WARNING", settings.log_format)
+    if settings.is_production:
+        print("refusing to seed SYNTHETIC demo data into ENVIRONMENT=production")
+        return 2
+    print(f"target database: {make_url(settings.database_url).render_as_string(hide_password=True)}")
     if not (args.dataset / "labels").is_dir():
         print(f"synthetic dataset not found at {args.dataset} (python -m ml.cv.synthetic --out {args.dataset})")
         return 1

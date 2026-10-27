@@ -33,7 +33,10 @@ class Settings(BaseSettings):
     api_prefix: str = "/api"
     cors_origins: Annotated[list[str], NoDecode] = ["http://localhost:8000", "http://127.0.0.1:8000"]
     serve_frontend: bool = True
-    api_key: str | None = None  # optional shared key for write endpoints; None/empty disables auth
+    api_key: SecretStr | None = None  # optional shared key for write endpoints; None/empty disables auth
+    # Simple in-process limit for the expensive endpoints (image upload -> CV pipeline, GET /rca -> LLM), per client
+    # address and minute. 0 disables. Not distributed: each worker process counts separately (see README).
+    rate_limit_per_minute: int = Field(60, ge=0, le=100_000)
 
     # Database
     database_url: str = "sqlite:///./data/qgenai-dev.db"

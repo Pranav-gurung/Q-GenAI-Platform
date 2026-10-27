@@ -56,3 +56,22 @@ def test_trace_keys():
 def test_internal_fields_not_serialised():
     dumped = build(image_sha256="abc").model_dump(mode="json")
     assert not {"image_sha256", "store_id", "sku_id", "item_id", "order_id"} & set(dumped)
+
+
+def test_operator_verdict_keeps_label_when_a_later_review_omits_types():
+    """Part 8: a later review that restates FAIL without defect types must not erase the earlier operator label."""
+    from types import SimpleNamespace as F
+
+    from backend.fulfillment.observations import operator_verdict
+    leak = ["LEAKING_PACKAGE"]
+    assert operator_verdict([]) is None
+    assert operator_verdict([F(outcome="FAIL", defect_types=leak), F(outcome="FAIL", defect_types=[])]) == (
+        DecisionOutcome.FAIL, [DefectType.LEAKING_PACKAGE])
+    assert operator_verdict([F(outcome="FAIL", defect_types=leak), F(outcome="REVIEW", defect_types=None)])[1] == [
+        DefectType.LEAKING_PACKAGE]
+    assert operator_verdict([F(outcome="FAIL", defect_types=leak), F(outcome="FAIL", defect_types=["TORN_PACKAGE"])])[
+        1] == [DefectType.TORN_PACKAGE]  # an explicit new label replaces the old one
+    assert operator_verdict([F(outcome="FAIL", defect_types=leak), F(outcome="PASS", defect_types=[])]) == (
+        DecisionOutcome.PASS, [])
+    assert operator_verdict([F(outcome="FAIL", defect_types=leak), F(outcome="PASS", defect_types=[]),
+                             F(outcome="FAIL", defect_types=[])]) == (DecisionOutcome.FAIL, [])  # PASS cleared it

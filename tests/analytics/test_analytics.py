@@ -242,3 +242,14 @@ def test_unlinked_inspections_are_their_own_trace(ai_client):
     o = overview(ai_client, "")
     assert {h["stage"]: h["first_observed_defects"] for h in o["hotspots"]} == {"PICKING": 1, "DISPATCH": 1}
 
+
+
+def test_later_review_without_types_keeps_operator_defect(client, valid_payload):
+    """Part 8 regression: verdict FAIL + LEAKING_PACKAGE, then a review restating FAIL without types (stub CV)."""
+    iid = client.post("/api/inspections", json=valid_payload).json()["inspection_id"]
+    client.post(f"/api/inspections/{iid}/image", files={"file": ("a.png", image_bytes(), "image/png")})
+    for body in ({"outcome": "FAIL", "defect_types": ["LEAKING_PACKAGE"]}, {"outcome": "FAIL", "rca_useful": True}):
+        assert client.post(f"/api/inspections/{iid}/feedback", json={"operator_id": "OP-1", **body}).status_code == 201
+    o = client.get("/api/analytics/overview").json()
+    assert o["inspections"]["defective"] == 1 and o["defects"][0]["defect_type"] == "LEAKING_PACKAGE"
+    assert client.get(f"/api/inspections/{iid}/pipeline").json()["defect_analyses"][0]["defect_type"] == "LEAKING_PACKAGE"

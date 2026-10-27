@@ -113,7 +113,7 @@ def load_model(weights: Path, device: str, taxonomy: Taxonomy, version_override:
     """Load (or return the cached) model. Raises ModelUnavailableError with a specific code."""
     weights = Path(weights)
     if not weights.is_file():
-        raise ModelUnavailableError("MODEL_NOT_FOUND", f"model artifact not found: {weights} "
+        raise ModelUnavailableError("MODEL_NOT_FOUND", f"model artifact not found: {weights.name} "
                                                        "(train one with `python -m ml.cv.train`, see README)")
     resolved_device = resolve_device(device)
     stat = weights.stat()

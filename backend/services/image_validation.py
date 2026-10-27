@@ -45,6 +45,11 @@ class ValidatedImage:
 def sanitize_filename(name: str | None) -> str:
     base = PurePath(name or "upload").name  # drop any directory components
     base = _SAFE_NAME.sub("_", base).strip("._") or "upload"
+    if len(base) <= 100:
+        return base
+    stem, dot, ext = base.rpartition(".")
+    if dot and 0 < len(ext) <= 10:  # keep the extension: it is checked against the decoded content
+        return stem[:100 - len(ext) - 1] + "." + ext
     return base[:100]
 
 
@@ -81,6 +86,8 @@ def validate_image(data: bytes, filename: str | None, content_type: str | None, 
     except (Image.DecompressionBombError, Image.DecompressionBombWarning) as exc:
         raise InvalidImageError("Image dimensions too large", code="IMAGE_TOO_LARGE") from exc
     except (UnidentifiedImageError, OSError, SyntaxError, ValueError) as exc:
+        raise InvalidImageError("File is not a valid image or is corrupt", code="CORRUPT_IMAGE") from exc
+    except Exception as exc:  # untrusted bytes: any other decoder / plugin failure is still a bad file, never a 500
         raise InvalidImageError("File is not a valid image or is corrupt", code="CORRUPT_IMAGE") from exc
 
     if fmt not in FORMATS or FORMATS[fmt][0] not in allowed_types:

@@ -8,6 +8,7 @@ from fastapi import APIRouter, Depends, File, Path, Query, Request, UploadFile, 
 from backend.api.dependencies import (get_feedback_service, get_inspection_service, get_settings_dep,
                                       require_api_key)
 from backend.api.errors import ERROR_RESPONSES
+from backend.api.security import expensive_endpoint
 from backend.core.config import Settings
 from backend.core.exceptions import InvalidImageError
 from backend.domain.fulfillment import FulfillmentStage
@@ -69,7 +70,7 @@ def get_inspection_pipeline(inspection_id: InspectionIdPath, service: Service) -
     return analyze_inspection_trace(service.session, service.get(inspection_id))
 
 
-@router.get("/{inspection_id}/rca", response_model=RootCauseAnalysis,
+@router.get("/{inspection_id}/rca", response_model=RootCauseAnalysis, dependencies=[Depends(expensive_endpoint)],
             summary="GenAI root-cause analysis, grounded in the fulfillment pipeline evidence",
             description="Rebuilds the deterministic Part 3 analysis from persisted inspections and operator feedback, "
                         "then asks the configured LLM for HYPOTHESES (likely contributing causes, corrective actions, "
@@ -81,7 +82,8 @@ def get_inspection_rca(inspection_id: InspectionIdPath, service: Service, reques
     return generate_inspection_rca(service.session, service.get(inspection_id), request.app.state.rca_service)
 
 
-@router.post("/{inspection_id}/image", response_model=InspectionDetail, dependencies=[Depends(require_api_key)],
+@router.post("/{inspection_id}/image", response_model=InspectionDetail,
+             dependencies=[Depends(require_api_key), Depends(expensive_endpoint)],
              summary="Upload the inspection image and run the pipeline",
              description="Validates the image (type, size, integrity), stores it, moves the inspection to "
                          "IMAGE_RECEIVED and runs the pipeline synchronously. Allowed from CREATED or "

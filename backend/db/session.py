@@ -1,10 +1,13 @@
 """Engine / session factory."""
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
 from sqlalchemy import Engine, create_engine, event, text
 from sqlalchemy.orm import Session, sessionmaker
+
+logger = logging.getLogger(__name__)
 
 
 def build_engine(database_url: str, *, echo: bool = False) -> Engine:
@@ -33,5 +36,6 @@ def check_connection(engine: Engine) -> bool:
         with engine.connect() as conn:
             conn.execute(text("SELECT 1"))
         return True
-    except Exception:
+    except Exception as exc:  # exception type only: driver messages can contain host / user names
+        logger.warning("database connection check failed: %s", type(exc).__name__)
         return False

@@ -28,8 +28,13 @@ from backend.domain.fulfillment import FulfillmentStage
 
 GENERAL = "GENERAL"
 STAGE_SCOPES = tuple(s.value for s in FulfillmentStage) + (GENERAL,)
-SUSPICIOUS = re.compile(r"ignore (all |any )?(previous|prior|above) instructions|disregard (the )?(system|previous)|"
-                        r"you are now|system prompt|<\s*/?\s*(system|evidence|sources)\s*>", re.I)
+SUSPICIOUS = re.compile(
+    r"ignore (all |any )?(previous|prior|above|earlier) (instructions|rules)|disregard (the |all )?(system|previous|prior)|"
+    r"you are now|system prompt|<\s*/?\s*(system|evidence|sources|context)\s*>|"
+    # attempts to control the system's decisions (operational SOP text never tells the AI to pass / approve items)
+    r"\b(mark|set|change|override|flip|force)\b[^.\n]{0,40}\b(inspection|item|shipment|order|decision|result|"
+    r"status)s?\b[^.\n]{0,20}\b(as |to )?(pass(ed)?|approved?|ok(ay)?|accepted)\b|"
+    r"\bapprove (this|the|all|every) (shipment|order|item|inspection|batch)s?\b", re.I)
 
 
 class DocumentMetadata(BaseModel):

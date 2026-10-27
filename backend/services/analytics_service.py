@@ -22,10 +22,10 @@ from sqlalchemy.orm import Session
 
 from backend.core.exceptions import ValidationFailedError
 from backend.db.models import Feedback, Inspection, InspectionImage, InspectionResult, Sku, Store
-from backend.domain.enums import DecisionOutcome, DefectType, ModuleStatus
+from backend.domain.enums import DefectType, ModuleStatus
 from backend.domain.fulfillment import FULFILLMENT_FLOW, FulfillmentStage
 from backend.fulfillment.analyzer import analyze_trace
-from backend.fulfillment.observations import build_observation, trace_key_for
+from backend.fulfillment.observations import build_observation, operator_verdict, trace_key_for
 from backend.pipeline.states import PipelineState
 from backend.schemas.analytics import (AnalyticsOverview, DefectStageMatrix, DefectTypeMetrics, FeedbackMetrics,
                                        GroupMetrics, Hotspot, InspectionMetrics, Investigation, MatrixRow, Period,
@@ -141,21 +141,22 @@ class AnalyticsService:
             select(InspectionImage.inspection_id, InspectionImage.image_id, InspectionImage.sha256,
                    InspectionImage.created_at).where(InspectionImage.inspection_id.in_(ids))
             .order_by(InspectionImage.created_at, InspectionImage.image_id))}  # last image wins
-        feedback = {r.inspection_id: r for r in self.session.execute(
-            select(Feedback.inspection_id, Feedback.outcome, Feedback.defect_types)
-            .where(Feedback.inspection_id.in_(ids)).order_by(Feedback.created_at, Feedback.feedback_id))}
+        feedback: dict[str, list] = defaultdict(list)
+        for r in self.session.execute(select(Feedback.inspection_id, Feedback.outcome, Feedback.defect_types)
+                                      .where(Feedback.inspection_id.in_(ids))
+                                      .order_by(Feedback.created_at, Feedback.feedback_id)):
+            feedback[r.inspection_id].append(r)  # oldest -> newest; folded by operator_verdict (Part 3 rule)
 
         out, demo = [], 0
         for r in rows:
             demo += bool((r.metadata_ or {}).get(DEMO_SEED_KEY))
-            img, fb = images.get(r.inspection_id), feedback.get(r.inspection_id)
+            img, verdict = images.get(r.inspection_id), operator_verdict(feedback.get(r.inspection_id, []))
             decision = QualityDecision.model_validate(r.decision) if r.decision else None
             cv = CVResult.model_validate(r.cv) if r.cv else None
             obs = build_observation(
                 inspection_id=r.inspection_id, stage=r.stage, observed_at=img.created_at if img else r.created_at,
                 store_id=r.store_id, sku_id=r.sku_id, item_id=r.item_id, order_id=r.order_id, decision=decision,
-                cv=cv, operator_outcome=DecisionOutcome(fb.outcome) if fb else None,
-                operator_defects=[DefectType(t) for t in (fb.defect_types or [])] if fb else None,
+                cv=cv, operator_outcome=verdict[0] if verdict else None, operator_defects=verdict[1] if verdict else None,
                 image_id=img.image_id if img else None, image_sha256=img.sha256 if img else None)
             if obs.decision_source is not EvidenceSource.NO_DECISION:
                 outcome = obs.status.value

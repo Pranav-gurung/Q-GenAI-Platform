@@ -2,8 +2,9 @@
 
 **Computer-vision-first quality intelligence for quick-commerce dark stores.**
 
-> **Status: Part 7 of 8, Operations Intelligence** (on top of Parts 1-6: foundation + pipeline, computer vision,
-> fulfillment pipeline intelligence, GenAI RCA, RAG / SOP, operator feedback). Implemented: inspection pipeline, API, database, operator
+> **Status: Part 8 of 8, hardened for demo** (Parts 1-7: foundation + pipeline, computer vision, fulfillment
+> pipeline intelligence, GenAI RCA, RAG / SOP, operator feedback, operations intelligence; Part 8: security,
+> reliability and reproducibility review, see [Security](#security--production-hardening-part-8)). Implemented: inspection pipeline, API, database, operator
 > UI, an image quality gate, a **real YOLOv8 CV engine**, deterministic decision rules, dataset / training /
 > evaluation tooling, **deterministic first-defect stage attribution**, an **evidence-grounded GenAI RCA** that
 > only adds labelled hypotheses, actions and checks, and **SOP-grounded corrective actions** retrieved from a
@@ -16,6 +17,71 @@
 > automatically: retraining is a human decision.
 
 ---
+
+## Quick start
+
+Everything below runs without an API key or GPU. The LLM is the deterministic **mock provider** (a test double,
+labelled "MOCK provider (not AI)" in the UI), and all data and SOPs are SYNTHETIC / DEMO.
+
+**1. Install** (Python 3.11+):
+
+```bash
+git clone https://github.com/Pranav-gurung/q-genai-platform.git && cd q-genai-platform
+python -m venv .venv && source .venv/bin/activate
+pip install -e ".[dev]"                 # add ".[dev,cv]" for the real YOLO engine (pulls PyTorch)
+```
+
+**2. Configure:** `cp .env.example .env`, then set at least:
+
+```bash
+DATABASE_URL=sqlite:///./data/qgenai-dev.db     # or postgresql+psycopg://qgenai:<pw>@localhost:5432/qgenai
+PIPELINE_ANALYSIS_ENGINE=deterministic
+RCA_ENGINE=genai
+ACTION_ENGINE=rca
+LLM_ENABLED=true
+LLM_PROVIDER=mock                               # real model: LLM_PROVIDER=anthropic + LLM_API_KEY, pip install -e ".[llm]"
+RAG_ENABLED=true
+```
+
+**3. Database:** SQLite needs nothing. For PostgreSQL, `docker compose up -d db` or any server, then:
+
+```bash
+alembic upgrade head
+python -m scripts.seed_sample_data                 # 4 sample stores, 10 sample SKUs (simulated)
+python -m backend.rag.ingest                       # builds the SOP index from knowledge/ (DEMO / SYNTHETIC)
+```
+
+**4. Backend and frontend:** the API also serves the static UI, so there is no frontend build step.
+
+```bash
+uvicorn backend.main:create_app --factory --port 8000
+```
+
+**5. Open:**
+- UI: <http://localhost:8000/>, with the **Operations Intelligence** tab for the dashboard;
+- API docs: <http://localhost:8000/api/docs>;
+- health: <http://localhost:8000/api/health>.
+
+**6. Canonical demo** (in a second terminal):
+
+```bash
+python -m scripts.demo_canonical       # RECEIVING/STORAGE/PICKING pass, PACKING leak -> RCA -> SOP -> review -> analytics
+```
+
+Without a CV model, the PASS / FAIL verdicts are recorded as operator verdicts (the Part 3 operator-feedback path).
+
+**7. Full CV demo (optional, about 20 min CPU training).** Train the demo model on synthetic data (see
+[Computer Vision](#computer-vision-part-2)), add `CV_ENGINE=yolov8 QUALITY_GATE_ENGINE=basic
+DECISION_ENGINE=rules DECISION_AUTO_PASS=true` to `.env`, restart the API, then:
+
+```bash
+python -m scripts.demo_canonical --images data/cv/synthetic-v1   # the YOLO model sees the leak itself
+python -m scripts.seed_demo_operations                          # 102 synthetic inspections for the dashboard
+```
+
+**Docker** (PostgreSQL + API, migrations, sample data and the SOP index on start): `docker compose up --build`,
+then step 5. The same flow is covered by the test `pytest tests/test_end_to_end.py`, which needs no key, model or
+server.
 
 ## Problem
 
@@ -170,7 +236,7 @@ q-genai/
 ├── data/                     raw/ processed/ feedback/ cv/ (git-ignored), samples/ (simulated data)
 ├── artifacts/cv/             trained model versions (git-ignored)
 ├── knowledge/                DEMO / SYNTHETIC SOP knowledge base for RAG (Part 5)
-├── scripts/                  seed_sample_data.py, seed_demo_operations.py, export_learning_candidates.py, smoke_test.sh
+├── scripts/                  seed_sample_data.py, demo_canonical.py, seed_demo_operations.py, export_learning_candidates.py, smoke_test.sh
 ├── docker/                   Dockerfile, entrypoint (migrate → seed → serve)
 └── tests/                    unit/ api/ integration/ cv/
 ```
@@ -1141,6 +1207,66 @@ pipeline, not hard-coded.
 
 `GET /api/health` → `analytics: {enabled, status: ready|unavailable, mode: "deterministic"}`.
 
+## Security & Production Hardening (Part 8)
+
+Q-GenAI is **security-hardened for the project/demo architecture**: one FastAPI service, PostgreSQL and a static
+UI. It is not "production secure". The table lists what is in place and how it is verified.
+
+| Area | What is in place |
+|---|---|
+| **Secrets** | Environment variables only (`LLM_API_KEY` / `ANTHROPIC_API_KEY`, `API_KEY`, `DATABASE_URL`, `POSTGRES_PASSWORD`). Keys are `SecretStr` (masked in reprs). `.env` is git-ignored and never committed; `.env.example` holds empty placeholders. Health never returns keys or the DB URL. The SDK / HTTP debug loggers are pinned to WARNING so request bodies and auth headers are not logged. A repository and history scan found only test fixtures (`sk-ant-test…`). |
+| **Production guards** | `ENVIRONMENT=production` refuses `CORS_ORIGINS=*`, SQLite and the mock LLM, and logs a warning when `API_KEY` is unset. The demo seed script refuses production. |
+| **CORS** | Explicit origin list (`CORS_ORIGINS`), no credentials, GET / POST only. |
+| **HTTP** | Security headers on every response: `nosniff`, `X-Frame-Options: DENY`, `no-referrer`, a same-origin CSP (not on `/api/docs`, which loads Swagger assets). `X-Request-ID` is sanitised before being echoed or logged. |
+| **Uploads** | Bodies over `MAX_UPLOAD_MB` are rejected **before** the multipart parser spools them, by `Content-Length` or by counting streamed bytes. File names are reduced to a safe base name; storage keys are server-generated and confined to the storage root. Content is decoded and must match both the extension and the declared type (JPEG / PNG / WebP only). A full decode catches corrupt or truncated files; a pixel limit stops decompression bombs. All of this runs before CV. |
+| **Rate limit** | `RATE_LIMIT_PER_MINUTE` (default 60, per client address, in-process) on the two expensive endpoints: image upload (CV) and `GET /rca` (LLM). Responds `429 RATE_LIMITED` with a retry time. |
+| **Input validation** | Pydantic / FastAPI for every ID (pattern), enum, date, pagination value and correction. Request bodies reject unknown fields, so clients cannot set `learning_status`, AI values or other internal fields. All database access goes through the SQLAlchemy ORM / expression API with bound parameters; no SQL is built from strings. Injection-shaped IDs return 404 / 422. |
+| **Errors** | One error envelope with a stable code. Unhandled errors return `INTERNAL_ERROR` with no stack trace, path, DB URL or exception text; details go to the log only. Module crashes are stored as a generic `MODULE_ERROR`. Health and RAG messages carry no filesystem paths. |
+| **Conservative decisions** | Unknown or unavailable never becomes PASS: no decision means `REQUIRES_REVIEW`, a module error means `FAILED`, image rejection means review, and an explicit CUDA setting without a GPU is an error, not a fallback. The LLM, RAG and analytics cannot change a decision, a detection, an attribution or an evidence level. |
+| **Prompt injection** | Static system prompts. Evidence, operator comments and SOP text are JSON-escaped (`<` / `>`) inside delimited blocks and declared data. Every output is schema-validated, and guardrails reject causal certainty, invented numbers, invented SOP references and person blame. |
+| **RAG trust boundary** | SOP text is retrieved as data. Instruction-like or decision-control text ("ignore previous instructions", "approve this shipment", "mark the inspection as PASS") is flagged at ingestion and **can never become an SOP-backed action** (`INSTRUCTION_TEXT` guardrail). This is tested with a model that obeys the injection. Normal operational imperatives ("inspect", "seal", "reject", "quarantine") are unaffected. Citations must be retrieved chunk IDs with verbatim quotes, and source metadata comes from the index. |
+| **Feedback integrity** | Feedback never edits `inspection_results`. Corrections are stored next to a snapshot of the AI output. Every submission is kept, and values are enum-checked. A later review that omits defect types no longer erases an earlier operator defect label (fixed in Part 8). |
+| **Analytics** | Read-only, parameterised, IDs and dates validated, period capped at 366 days, zero denominators → `null`. |
+| **Docker** | Non-root user. Secrets via environment only (`.dockerignore` excludes `.env`, data, weights). `HEALTHCHECK` on `/api/health`, `restart: unless-stopped`, PostgreSQL published on `127.0.0.1` only. |
+| **Dependencies** | Major versions bounded for the core stack; minimums raised past known CVEs (`python-multipart >= 0.0.18`, `pillow >= 10.3`); `ultralytics` pinned. |
+
+### Security checklist (verified in Part 8)
+
+```
+[✓] Secrets externalized; repo + history scanned (test fixtures only)
+[✓] Health / errors / logs checked for API keys, DB password, paths   (tests/security)
+[✓] Upload path traversal protection                                   (10 hostile names, storage confinement)
+[✓] File validation: type, content, corruption, size, pixel bombs      (before CV)
+[✓] Early request-size limit (Content-Length and chunked)
+[✓] API input validation: IDs, injection-shaped input, enums, pagination, dates, 366-day cap
+[✓] SQL parameterization (ORM / expression API only)
+[✓] Safe exception handling (no traces, paths, URLs or exception text in responses)
+[✓] Security headers + sanitised request IDs
+[✓] CORS: explicit origins, no credentials, production guard
+[✓] Rate limit on CV / LLM endpoints (in-process)
+[✓] Prompt injection: operator comments and SOP text stay data
+[✓] RAG trust boundary: injected SOP text cannot become an action (tested with an obeying model)
+[✓] Operator feedback cannot mutate AI results; corrections are structured
+[✓] Conservative failures: CV crash / missing model / CUDA without GPU / blur / invalid LLM output never PASS
+[✓] Health endpoint reviewed (no LLM call, no secrets, degraded when components are unavailable)
+[✓] Docker image built and run: non-root, healthy, headers present, no secrets in logs
+[✓] Demo data marked synthetic; seed script refuses production and re-runs
+[✓] End-to-end regression: CV -> decision -> pipeline -> GenAI -> RAG -> feedback -> analytics
+```
+
+### Limitations (honest)
+
+* **No enterprise authentication.** `API_KEY` is one shared key for write endpoints, and the bundled UI does not
+  send it, so the UI is for trusted networks. There are no user accounts, roles or SSO; `operator_id` is
+  self-declared.
+* **No distributed rate limiting, WAF or TLS termination.** The rate limit is per process and keyed on the client
+  address (behind a proxy, all users share one address). Put the service behind a TLS-terminating reverse proxy
+  for anything beyond a demo.
+* Reads, including `GET /rca` (which can call the LLM), are unauthenticated; they are rate-limited only.
+* **Synthetic CV model, demo SOP knowledge base, simulated stores / SKUs.** None of it is real company data.
+* No automatic model retraining (by design); feedback requires human curation.
+* No malware scanning of uploads (images are fully decoded and re-validated, never executed).
+
 ## Local setup
 
 Requirements: Python 3.11+, and either PostgreSQL 14+ or nothing (SQLite fallback). Docker is optional.
@@ -1195,7 +1321,8 @@ End-to-end smoke test against a running server: `scripts/smoke_test.sh http://lo
 | `API_HOST` / `API_PORT` / `API_PREFIX` | `0.0.0.0` / `8000` / `/api` | Server binding and URL prefix |
 | `CORS_ORIGINS` | `http://localhost:8000,…` | Comma-separated allowed origins |
 | `SERVE_FRONTEND` | `true` | Serve `frontend/` at `/` |
-| `API_KEY` | *(empty)* | If set, POST endpoints require header `X-API-Key` (stop-gap, not user auth) |
+| `API_KEY` | *(empty)* | If set, POST endpoints require header `X-API-Key` (stop-gap, not user auth; warned about in production) |
+| `RATE_LIMIT_PER_MINUTE` | `60` | Per-client limit on image upload and `GET /rca` (in-process; 0 disables) |
 | `DATABASE_URL` | `sqlite:///./data/qgenai-dev.db` | SQLAlchemy URL (`postgresql+psycopg://…` recommended) |
 | `SEED_SAMPLE_DATA` | `false` | Seed simulated stores/SKUs on startup when the DB is empty |
 | `STORAGE_BACKEND` / `STORAGE_PATH` | `local` / `data/raw/images` | Image storage |
@@ -1341,6 +1468,17 @@ numbers:
 * invalid dates and ranges, SQL-injection-shaped ids, read-only behaviour and health;
 * the synthetic demo seed with the real YOLO model.
 
+**Security & reliability tests** (`tests/security/`, `tests/test_end_to_end.py`) cover:
+* security headers, request-id sanitising, early size limits (Content-Length and chunked), rate limiting, CORS and
+  production guards;
+* hostile file names, disguised / corrupt / empty / oversized files and pixel bombs;
+* injection-shaped IDs on every endpoint, invalid enums, pagination, dates and ranges, invalid feedback values;
+* malicious SOP text with a model that obeys it, malicious operator comments, invalid LLM output, no API key, RAG
+  unavailable;
+* no secrets in health, errors or logs;
+* CV crashes, missing model, CUDA without GPU and blur never PASS;
+* the canonical chain end to end.
+
 **Feedback tests** (`tests/feedback/`) cover:
 * each review layer (correct and corrected) and RCA / action usefulness;
 * invalid enums, internal fields, inconsistent reviews and reviews of layers the AI did not produce;
@@ -1361,8 +1499,9 @@ numbers:
 | 4 | GenAI Root-Cause Analysis (grounded hypotheses, corrective actions, safe fallback) | ✅ |
 | 5 | RAG / SOP Intelligence (demo SOP knowledge base, retrieval, cited SOP-grounded actions) | ✅ (demo SOPs only) |
 | 6 | Operator Feedback & Learning Loop (structured review, error analysis, candidate export; no automatic retraining) | ✅ |
-| **7** | Operations Intelligence (deterministic quality analytics, observed hotspots, trends, feedback quality, dashboard) | ✅ this commit |
-| 8 | Minimal security + production hardening (operator auth/roles, async workers, object storage) | planned |
+| 7 | Operations Intelligence (deterministic quality analytics, observed hotspots, trends, feedback quality, dashboard) | ✅ |
+| **8** | Production hardening, security & demo reliability (review, fixes, security regression tests, quick start) | ✅ this commit |
+| later | Real operator auth / roles, async workers, object storage, TLS reverse proxy | not planned in this project |
 | later | Image Quality Gate, advanced (glare, framing/occlusion, product-in-frame, retake UX) | planned |
 
 ## Known limitations

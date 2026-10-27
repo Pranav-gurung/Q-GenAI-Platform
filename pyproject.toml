@@ -9,15 +9,15 @@ description = "Computer-vision-first quality intelligence pipeline for quick-com
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
-    "fastapi>=0.115",
+    "fastapi>=0.115,<1",
     "uvicorn[standard]>=0.30",
-    "pydantic>=2.7",
-    "pydantic-settings>=2.3",
-    "sqlalchemy>=2.0.30",
-    "alembic>=1.13",
-    "psycopg[binary]>=3.1",
-    "python-multipart>=0.0.9",
-    "pillow>=10.3",
+    "pydantic>=2.7,<3",
+    "pydantic-settings>=2.3,<3",
+    "sqlalchemy>=2.0.30,<3",
+    "alembic>=1.13,<2",
+    "psycopg[binary]>=3.1,<4",
+    "python-multipart>=0.0.18,<1",   # >= 0.0.18: multipart DoS fix (CVE-2024-53981)
+    "pillow>=10.3",          # >= 10.3: BuildCMS buffer overflow fix (CVE-2024-28219)
     "numpy>=1.26",          # image quality gate, CV postprocessing
     "pyyaml>=6.0",          # defect taxonomy / dataset definitions, SOP front matter
 ]
@@ -36,7 +36,7 @@ cv = [
 ]
 # GenAI root-cause analysis with LLM_PROVIDER=anthropic (Part 4)
 llm = [
-    "anthropic>=2.3",
+    "anthropic>=2.3,<3",
 ]
 # Optional neural embeddings for RAG (RAG_EMBEDDING_PROVIDER=sentence_transformers; downloads a model from
 # Hugging Face on first use). The default "hashing" provider needs only numpy.

@@ -11,10 +11,9 @@ from sqlalchemy.orm import Session, selectinload
 
 from backend.core.logging import log_pipeline
 from backend.db.models import Feedback, Inspection
-from backend.domain.enums import DecisionOutcome, DefectType
 from backend.fulfillment.analyzer import analyze_trace
 from backend.fulfillment.engine import log_analysis
-from backend.fulfillment.observations import build_observation, trace_key_for
+from backend.fulfillment.observations import build_observation, operator_verdict, trace_key_for
 from backend.pipeline.states import PipelineState
 from backend.schemas.fulfillment import FulfillmentTraceAnalysis, PipelineObservation, TraceKeyType
 from backend.schemas.results import CVResult, QualityDecision
@@ -38,17 +37,18 @@ def _trace_query(insp: Inspection):
         .order_by(Inspection.created_at, Inspection.inspection_id).limit(MAX_TRACE_OBSERVATIONS)
 
 
-def observation_from_row(row: Inspection, feedback: Feedback | None) -> PipelineObservation:
+def observation_from_row(row: Inspection, feedback: list[Feedback] | Feedback | None) -> PipelineObservation:
     result = row.result
     image = row.current_image
+    rows = feedback if isinstance(feedback, list) else ([feedback] if feedback is not None else [])
+    verdict = operator_verdict(rows)
     return build_observation(
         inspection_id=row.inspection_id, stage=row.stage,
         observed_at=image.created_at if image else row.created_at,
         store_id=row.store_id, sku_id=row.sku_id, item_id=row.item_id, order_id=row.order_id,
         decision=QualityDecision.model_validate(result.decision) if result and result.decision else None,
         cv=CVResult.model_validate(result.cv) if result and result.cv else None,
-        operator_outcome=DecisionOutcome(feedback.outcome) if feedback else None,
-        operator_defects=[DefectType(t) for t in (feedback.defect_types or [])] if feedback else None,
+        operator_outcome=verdict[0] if verdict else None, operator_defects=verdict[1] if verdict else None,
         image_id=image.image_id if image else None, image_sha256=image.sha256 if image else None)
 
 
@@ -57,11 +57,11 @@ def load_trace_observations(session: Session, insp: Inspection, *, exclude_curre
     rows = [r for r in session.scalars(query) if not (exclude_current and r.inspection_id == insp.inspection_id)]
     if not rows:
         return []
-    latest_feedback: dict[str, Feedback] = {}
+    feedback: dict[str, list[Feedback]] = {}
     for fb in session.scalars(select(Feedback).where(Feedback.inspection_id.in_([r.inspection_id for r in rows]))
                               .order_by(Feedback.created_at, Feedback.feedback_id)):
-        latest_feedback[fb.inspection_id] = fb  # ordered ascending -> last one wins
-    return [observation_from_row(r, latest_feedback.get(r.inspection_id)) for r in rows]
+        feedback.setdefault(fb.inspection_id, []).append(fb)  # oldest -> newest; folded by operator_verdict
+    return [observation_from_row(r, feedback.get(r.inspection_id, [])) for r in rows]
 
 
 def analyze_inspection_trace(session: Session, insp: Inspection) -> FulfillmentTraceAnalysis:

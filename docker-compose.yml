@@ -5,8 +5,9 @@ services:
     environment:
       POSTGRES_DB: qgenai
       POSTGRES_USER: qgenai
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}   # dev default; override via .env
-    ports: ["5432:5432"]
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}   # dev-only default; set POSTGRES_PASSWORD in .env
+    ports: ["127.0.0.1:5432:5432"]   # reachable from this machine only
+    restart: unless-stopped
     volumes: [pgdata:/var/lib/postgresql/data]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U qgenai -d qgenai"]
@@ -24,7 +25,17 @@ services:
       SEED_SAMPLE_DATA: "true"
       CORS_ORIGINS: http://localhost:8000
       LOG_FORMAT: ${LOG_FORMAT:-console}
+      # Demo defaults (override in .env): deterministic analysis, GenAI RCA with the MOCK provider (no key needed),
+      # SOP grounding over the DEMO / SYNTHETIC knowledge base (index built by the entrypoint).
+      PIPELINE_ANALYSIS_ENGINE: ${PIPELINE_ANALYSIS_ENGINE:-deterministic}
+      RCA_ENGINE: ${RCA_ENGINE:-genai}
+      ACTION_ENGINE: ${ACTION_ENGINE:-rca}
+      LLM_ENABLED: ${LLM_ENABLED:-true}
+      LLM_PROVIDER: ${LLM_PROVIDER:-mock}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      RAG_ENABLED: ${RAG_ENABLED:-true}
     ports: ["8000:8000"]
+    restart: unless-stopped
     volumes: [images:/app/data/raw/images]
 
 volumes:

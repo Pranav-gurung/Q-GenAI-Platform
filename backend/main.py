@@ -13,6 +13,7 @@ from fastapi.staticfiles import StaticFiles
 
 from backend import __version__
 from backend.api.errors import register_exception_handlers
+from backend.api.security import BODY_OVERHEAD_BYTES, HardeningMiddleware, RateLimiter, clean_request_id
 from backend.api.routes import analytics, feedback, health, inspections, reference
 from backend.core.config import Settings, get_settings
 from backend.core.logging import configure_logging, request_id_var
@@ -71,13 +72,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.orchestrator = PipelineOrchestrator(build_modules(settings))
     rca_engine = app.state.orchestrator.modules.rca_engine
     app.state.rca_service = getattr(rca_engine, "service", None) or RCAService(settings)  # shared by GET /rca
+    app.state.rate_limiter = RateLimiter()
+    if settings.is_production and settings.api_key is None:
+        logger.warning("API_KEY is not set: write endpoints (create, upload, feedback) are unauthenticated")
 
     app.add_middleware(CORSMiddleware, allow_origins=settings.cors_origins, allow_credentials=False,
                        allow_methods=["GET", "POST"], allow_headers=["Content-Type", "X-API-Key", "X-Request-ID"])
 
     @app.middleware("http")
     async def request_context(request: Request, call_next):
-        rid = request.headers.get("X-Request-ID", "")[:64] or uuid.uuid4().hex[:16]
+        rid = clean_request_id(request.headers.get("X-Request-ID")) or uuid.uuid4().hex[:16]
         request.state.request_id = rid
         token = request_id_var.set(rid)
         start = time.perf_counter()
@@ -92,6 +96,9 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 (time.perf_counter() - start) * 1000, extra={"request_id": rid})
         return response
 
+    # outermost: size limit before any body is read, security headers on every response (incl. errors / static)
+    app.add_middleware(HardeningMiddleware, max_body_bytes=settings.max_upload_bytes + BODY_OVERHEAD_BYTES,
+                       max_upload_bytes=settings.max_upload_bytes, docs_prefix=f"{settings.api_prefix}/docs")
     register_exception_handlers(app)
     for module in (health, reference, inspections, feedback, analytics):
         app.include_router(module.router, prefix=settings.api_prefix)

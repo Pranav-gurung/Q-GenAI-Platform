@@ -1,8 +1,10 @@
 """Normalise existing inspection results into PipelineObservations (no re-inference).
 
 Precedence for one inspection:
-  1. Operator feedback (latest) - status = operator outcome; defects = operator's defect types. If the operator
-     gave no types: PASS -> no defects, FAIL/REVIEW -> the CV detections (source MODEL).
+  1. Operator feedback (latest) - status = operator outcome; defects = operator's defect types. If the latest
+     feedback gives no types: PASS -> no defects; FAIL/REVIEW -> the most recent earlier operator label for that
+     inspection (since its last PASS verdict; "unspecified" is not "none"), else the CV detections (source MODEL).
+     See `operator_verdict`.
   2. A real decision (rules engine) - status = PASS/FAIL/REVIEW, defects = CV detection types.
   3. No usable decision (quality rejected, CV unavailable, failed run, stub) - status REVIEW: an inspection
      that could not decide is NEVER treated as a clean PASS. Real CV detections, if any, are kept.
@@ -26,6 +28,24 @@ def trace_key_for(store_id: str, sku_id: str, item_id: str | None, order_id: str
     if order_id:
         return TraceKey(key_type=TraceKeyType.ORDER, store_id=store_id, sku_id=sku_id, order_id=order_id)
     return TraceKey(key_type=TraceKeyType.NONE, store_id=store_id, sku_id=sku_id)
+
+
+def operator_verdict(feedback_rows) -> tuple[DecisionOutcome, list[DefectType]] | None:
+    """Fold an inspection's feedback (oldest -> newest; objects with .outcome and .defect_types) into one verdict.
+
+    The latest verdict wins. A later review that restates FAIL / REVIEW without defect types keeps the most recent
+    earlier operator defect label instead of silently erasing it; a PASS verdict clears labels; a new explicit label
+    replaces the old one.
+    """
+    outcome, label = None, []
+    for fb in feedback_rows:
+        outcome = DecisionOutcome(getattr(fb.outcome, "value", fb.outcome))
+        types = [DefectType(t) for t in (fb.defect_types or [])]
+        if outcome is DecisionOutcome.PASS:
+            label = []
+        elif types:
+            label = types
+    return (outcome, label) if outcome is not None else None
 
 
 def _cv_defects(cv: CVResult | None) -> list[ObservedDefect]:

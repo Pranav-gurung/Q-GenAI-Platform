@@ -55,13 +55,14 @@ class VectorIndex:
     def load(cls, path: Path) -> "VectorIndex":
         path = Path(path)
         if not (path / "manifest.json").is_file():
-            raise IndexUnavailable("INDEX_MISSING", f"no vector index at {path} (run: python -m backend.rag.ingest)")
+            raise IndexUnavailable("INDEX_MISSING", "the SOP vector index has not been built "
+                                                   "(run: python -m backend.rag.ingest)")
         try:
             manifest = json.loads((path / "manifest.json").read_text())
             chunks = [Chunk.model_validate(c) for c in json.loads((path / "chunks.json").read_text())]
             vectors = np.load(path / "vectors.npy")
         except Exception as exc:
-            raise IndexUnavailable("INDEX_CORRUPT", f"vector index at {path} cannot be read") from exc
+            raise IndexUnavailable("INDEX_CORRUPT", "the SOP vector index cannot be read") from exc
         if manifest.get("format") != INDEX_FORMAT or vectors.shape != (len(chunks), manifest.get("dim")):
             raise IndexUnavailable("INDEX_CORRUPT", "vector index shape or format does not match its manifest")
         return cls(chunks=chunks, vectors=vectors, manifest=manifest)
