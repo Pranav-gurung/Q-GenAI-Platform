@@ -55,3 +55,15 @@ button.secondary { background: transparent; color: var(--accent); border: 1px so
 .sop-actions li { list-style: none; margin-left: -18px; } .sop-actions li::before { content: "\2713  "; color: var(--ok); font-weight: 700; }
 .sop-source { display: block; color: var(--muted); font-size: .8rem; }
 .rag-sources { font-size: .85rem; padding-left: 18px; }
+.review-ai { border-left: 3px solid var(--warn); padding-left: 8px; margin-bottom: 8px; }
+.review-ai h4 { margin: 4px 0; font-size: .82rem; color: var(--muted); text-transform: uppercase; }
+.review-row { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; margin-bottom: 8px; }
+.review-row > span:first-child { min-width: 150px; font-weight: 500; }
+.review-row label { display: inline-flex; align-items: center; gap: 4px; margin: 0; font-weight: 400; }
+.review-row label input { width: auto; display: inline; margin: 0; }
+.review-row select { width: auto; display: inline-block; margin: 0; }
+.review-row .na { color: var(--muted); font-size: .85rem; }
+textarea { display: block; width: 100%; margin-top: 4px; padding: 8px; font: inherit; color: inherit;
+  background: var(--bg); border: 1px solid var(--border); border-radius: 6px; }
+.review-history { padding-left: 18px; font-size: .85rem; }
+.review-row [hidden] { display: none; }

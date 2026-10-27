@@ -63,6 +63,21 @@
         <button type="button" id="r-rca-generate" class="secondary" hidden>Generate GenAI RCA</button>
         <p class="meta disclaimer" id="r-rca-disclaimer"></p>
       </div>
+      <div id="r-review" hidden>
+        <h3>Operator Review</h3>
+        <p class="meta">Your review is stored next to the AI result. It does not change the AI result and nothing is
+          retrained automatically.</p>
+        <div class="review-ai"><h4>AI Result</h4><dl id="r-review-ai"></dl></div>
+        <form id="review-form" novalidate>
+          <div id="review-rows"></div>
+          <label>Operator ID <input name="review_operator" maxlength="64" placeholder="OP-17" required></label>
+          <label>Comment <span class="opt">(optional)</span>
+            <textarea name="review_comment" maxlength="1000" rows="2"></textarea></label>
+          <button type="submit">Submit review</button>
+        </form>
+        <p id="r-review-status" class="meta" role="status"></p>
+        <ul id="r-review-history" class="meta review-history"></ul>
+      </div>
       <h3>Pipeline stages</h3>
       <ol id="r-stages"></ol>
     </section>

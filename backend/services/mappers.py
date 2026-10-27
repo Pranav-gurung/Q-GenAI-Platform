@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from backend.db.models import Feedback, Inspection, InspectionImage, InspectionResult
-from backend.schemas.feedback import FeedbackRecord
+from backend.schemas.feedback import FeedbackCorrection, FeedbackRecord
 from backend.schemas.image import ImageMetadata
 from backend.schemas.inspection import (InspectionDetail, InspectionEvent, InspectionResultOut, PipelineError,
                                         PipelineEventOut)
@@ -56,5 +56,28 @@ def feedback_to_schema(fb: Feedback) -> FeedbackRecord:
         corrected_detections=fb.corrected_detections or [], suspected_stage=fb.suspected_stage,
         comment=fb.comment, system_outcome=fb.system_outcome, is_correction=fb.is_correction,
         model_versions=dict(fb.model_versions or {}), learning_status=fb.learning_status,
-        created_at=fb.created_at,
+        created_at=fb.created_at, item_id=fb.inspection.item_id if fb.inspection else None,
+        order_id=fb.inspection.order_id if fb.inspection else None,
+        decision_correct=fb.decision_correct, defect_correct=fb.defect_correct, stage_correct=fb.stage_correct,
+        rca_useful=fb.rca_useful, action_useful=fb.action_useful, ai_defect_types=fb.ai_defect_types,
+        ai_stage=fb.ai_stage, ai_snapshot=dict(fb.ai_snapshot or {}), corrections=feedback_corrections(fb),
     )
+
+
+def feedback_corrections(fb: Feedback) -> list[FeedbackCorrection]:
+    """Layers the operator marked incorrect, with the AI value and the operator value side by side."""
+    out = []
+    if fb.decision_correct is False:
+        out.append(FeedbackCorrection(layer="DECISION", ai_value=_value(fb.system_outcome),
+                                      operator_value=_value(fb.outcome)))
+    if fb.defect_correct is False:
+        out.append(FeedbackCorrection(layer="DEFECT", ai_value=list(fb.ai_defect_types or []),
+                                      operator_value=list(fb.defect_types or [])))
+    if fb.stage_correct is False:
+        out.append(FeedbackCorrection(layer="STAGE", ai_value=_value(fb.ai_stage),
+                                      operator_value=_value(fb.suspected_stage)))
+    return out
+
+
+def _value(x):
+    return getattr(x, "value", x)

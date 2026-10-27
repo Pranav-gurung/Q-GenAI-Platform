@@ -2,15 +2,17 @@
 
 **Computer-vision-first quality intelligence for quick-commerce dark stores.**
 
-> **Status: Part 5 of 7, RAG / SOP Intelligence** (on top of Parts 1-4: foundation + pipeline, computer
-> vision, fulfillment pipeline intelligence, GenAI RCA). Implemented: inspection pipeline, API, database, operator
+> **Status: Part 6 of 7, Operator Feedback & Learning Loop** (on top of Parts 1-5: foundation + pipeline,
+> computer vision, fulfillment pipeline intelligence, GenAI RCA, RAG / SOP). Implemented: inspection pipeline, API, database, operator
 > UI, an image quality gate, a **real YOLOv8 CV engine**, deterministic decision rules, dataset / training /
 > evaluation tooling, **deterministic first-defect stage attribution**, an **evidence-grounded GenAI RCA** that
 > only adds labelled hypotheses, actions and checks, and **SOP-grounded corrective actions** retrieved from a
-> DEMO / SYNTHETIC knowledge base with citations.
+> DEMO / SYNTHETIC knowledge base with citations, plus a **structured operator review** of every AI layer with
+> deterministic error analysis and learning-candidate export.
 > **The only trained model is a demo model trained on SYNTHETIC data.** It proves the engineering end to end.
 > It is **not** evidence of accuracy on real product photos (see [Computer Vision](#computer-vision-part-2)).
-> The SOP knowledge base is demo content, not any company's real SOPs. Active learning is not implemented yet.
+> The SOP knowledge base is demo content, not any company's real SOPs. Feedback never retrains or changes anything
+> automatically: retraining is a human decision.
 
 ---
 
@@ -84,12 +86,12 @@ a **PipelineOrchestrator**. Each AI capability is a plug-in module behind a type
                 └────────┬────────┘
                          ▼
                 ┌─────────────────┐
-                │ Operator        │   POST /feedback     (Part 1 ✅: stored for learning)
+                │ Operator        │   POST /feedback     (Part 6 ✅: structured review of each AI layer)
                 │ Feedback        │
                 └────────┬────────┘
                          ▼
                 ┌─────────────────┐
-                │ Active Learning │   (Part 6)
+                │ Learning loop   │   error analysis + candidate export (Part 6 ✅); retraining = human decision
                 └────────┬────────┘
                          └──────────► CV MODEL
 ```
@@ -124,9 +126,10 @@ a **PipelineOrchestrator**. Each AI capability is a plug-in module behind a type
 | **Part 3:** Fulfillment stage history + deterministic first-defect attribution (`PIPELINE_ANALYSIS_ENGINE=deterministic`), `GET /api/inspections/{id}/pipeline`, UI timeline | ✅ | `backend/fulfillment/`, `backend/services/fulfillment_service.py` |
 | **Part 4:** Evidence-grounded GenAI RCA (`RCA_ENGINE=genai`, `ACTION_ENGINE=rca`), LLM provider abstraction (Anthropic + mock), guardrails, `GET /api/inspections/{id}/rca`, UI panel | ✅ | `backend/rca/`, `backend/services/rca_service.py` |
 | **Part 5:** RAG / SOP intelligence (`RAG_ENABLED`): demo SOP knowledge base, ingestion + validation, section chunking, embeddings, local vector index, retrieval, cited SOP-grounded actions, citation guardrails, health, UI | ✅ | `knowledge/`, `backend/rag/`, `backend/schemas/rag.py` |
+| **Part 6:** Operator feedback & learning loop: structured review (decision / defect / stage correct?, RCA / action useful?), AI snapshot next to corrections, `GET /feedback`, error analysis, learning-candidate export, UI Operator Review | ✅ | `backend/services/feedback_service.py`, `learning_service.py`, `backend/api/routes/feedback.py`, migration `0003` |
 
 **Not implemented yet (by design):** a vector database (a local numpy index is enough here), real approved SOPs,
-active-learning training, analytics dashboards, user accounts / RBAC. Also not implemented: any model trained
+automatic retraining / active-learning infrastructure (deliberately), analytics dashboards, user accounts / RBAC. Also not implemented: any model trained
 on real product photos.
 
 ### Honest placeholders: "no result" is never a fake result
@@ -218,7 +221,7 @@ decision PASS → `COMPLETED`; decision REVIEW → `PIPELINE_ANALYSIS` (stage hi
 | `PipelineAnalyzer.analyze` | `PipelineContext → PipelineAnalysis` (structured `trace_analysis`, suspected stage, evidence codes) | `stub`, **`deterministic`** (Part 3) |
 | `RCAEngine.analyze` | `PipelineContext → RCAResult` (structured `root_cause_analysis`; hypotheses, no invented confidence) | `stub`, **`genai`** (Part 4) |
 | `ActionEngine.recommend` | `RCAResult + context → ActionRecommendation` (action, priority, optional responsible stage, instructions) | `stub`, **`rca`** (Part 4) |
-| Feedback | `InspectionResult + operator feedback → FeedbackRecord` (`learning_status=PENDING`) | stored (Part 1); learning in Part 6 |
+| Feedback | `InspectionResult + operator feedback → FeedbackRecord` (`learning_status=PENDING`) | structured review + error analysis (Part 6); no automatic training |
 
 Modules are registered in `backend/pipeline/registry.py` and selected by env var. Part 2 plugged in the CV engine this way:
 
@@ -932,6 +935,103 @@ unmeasured: no API key was available.
 * Logs: inspection id, defect, stage, retrieval count, top similarity, status, latency and counts. They never
   include document text, prompts or keys.
 
+## Operator Feedback & Learning Loop (Part 6)
+
+Operators are the final authority. Part 6 lets them review each AI layer of an inspection and turns those
+reviews into structured data for **human-reviewed** error analysis and dataset curation.
+
+```
+AI output ─► Operator feedback ─► Error analysis ─► Candidate training data ─► Human / ML engineer review ─► Future model version
+```
+
+**Not implemented, on purpose:** automatic retraining or fine-tuning, automatic rule or threshold changes,
+automatic deployment, active-learning infrastructure. A single correction, or many, never changes production
+behaviour. A test submits five "FAIL should be REVIEW" overrides and checks that the next identical inspection
+is still decided FAIL by the same rules and model version.
+
+### What operators can review
+
+| Layer | Field | Correction (when `false`) |
+|---|---|---|
+| Decision (PASS / FAIL / REVIEW) | `decision_correct` | `outcome` = corrected decision |
+| CV defect types | `defect_correct` | `defect_types` = corrected defect set |
+| Pipeline attribution (first observed stage) | `stage_correct` | `suspected_stage` = stage where the operator says the defect was first observable |
+| GenAI RCA | `rca_useful` | – |
+| Recommended actions | `action_useful` | – |
+| Free text | `comment` (≤ 1000 chars) | – |
+
+Every field is optional, so the Part 1 payload (`operator_id` + `outcome` + …) still works. `*_correct=true`
+confirms the AI value, and the matching field may be omitted.
+
+* All values are validated against the platform enums. Unknown fields are rejected, so clients cannot set
+  `learning_status`, `is_correction` or AI values themselves.
+* A review must agree with its values, e.g. `stage_correct=false` with the same stage is rejected
+  (`422 FEEDBACK_INCONSISTENT`).
+* A layer the AI did not produce cannot be reviewed, e.g. a stage review on a PASS with no defect
+  (`422 AI_RESULT_NOT_AVAILABLE`).
+
+A corrected stage is **operator ground truth for evaluation**. It is not a causal claim, and it does not rewrite
+the system's attribution: `GET /pipeline` still shows the deterministic result. As before Part 6, the operator's
+*verdict and defect types* are used as the observation for that inspection in later trace analyses (Part 3
+precedence).
+
+### How feedback is stored
+
+The existing `feedback` table is extended (migration `0003`), not duplicated:
+
+* review flags;
+* the AI values they refer to (`system_outcome`, `ai_defect_types`, `ai_stage`);
+* `ai_snapshot`: what the AI showed at review time (decision and severity, CV defect types, stage attribution
+  with evidence level, RCA status / provider / model / prompt version, RAG status and cited SOP chunks, number of
+  SOP-backed actions);
+* `model_versions`.
+
+**The AI result (`inspection_results`) is never modified.** The AI value and the operator value sit side by side
+(`corrections[]` in the response). Every submission is kept (`GET /api/inspections/{id}/feedback`), and nothing
+is overwritten. Comments are stored verbatim as data. The only place they reach an LLM is the Part 4 RCA prompt,
+JSON-escaped inside the `<evidence>` block as `untrusted_operator_notes`; the SOP grounding prompt never sees
+them. Existing behaviour is kept: feedback on a `REQUIRES_REVIEW` inspection resolves it with the operator's
+verdict as the final decision.
+
+### Error analysis (`GET /api/feedback/analysis`)
+
+Deterministic counts over the **latest feedback per inspection** (earlier submissions stay stored), via
+SQLAlchemy, with no pandas or analytics database:
+
+* decision overrides (`FAIL -> REVIEW` transitions);
+* defect corrections by AI defect type, with `AI -> operator` pairs;
+* stage-attribution corrections by AI stage;
+* RCA and action usefulness rates;
+* `learning_status` counts.
+
+Filters: `store_id`, `sku_id`.
+
+### Learning candidates (`GET /api/feedback/learning-candidates`, `python -m scripts.export_learning_candidates`)
+
+One row per reviewed inspection. It has the AI value next to the operator value (decision, defects, stage), the
+item / order / store / SKU, the image id and SHA-256, model versions, correction layers and comment, plus
+`source: "operator_feedback"` and `requires_curation: true`. When the operator gave no defect label,
+`operator_defects` is `null`; it is never guessed. The CLI writes JSON Lines to `data/feedback/` (git-ignored).
+These are **dataset / evaluation candidates**: a person must curate them, then move `learning_status` from
+`PENDING` to `ACCEPTED` / `REJECTED` / `USED`, before any training or evaluation uses them.
+
+### UI
+
+After the RCA / SOP panel, a compact **Operator Review** section shows two parts:
+
+* **AI Result:** decision, defect, first observed stage with evidence, RCA / SOP status.
+* **Review controls:** Correct / Incorrect for the decision, defect and pipeline attribution (a correction
+  dropdown appears when "Incorrect" is chosen), Useful / Not useful for the RCA and recommended action, and a
+  comment.
+
+After submission it shows *"Feedback recorded for future system improvement."* and the review history with AI →
+operator corrections. It never claims the AI has learned.
+
+### Health
+
+`GET /api/health` → `feedback: {enabled, status: ready|unavailable, learning_mode: "manual_review",
+automatic_retraining: false, automatic_rule_changes: false}`.
+
 ## Local setup
 
 Requirements: Python 3.11+, and either PostgreSQL 14+ or nothing (SQLite fallback). Docker is optional.
@@ -1027,14 +1127,17 @@ All endpoints are under `/api`. Interactive docs with request/response/error sch
 | Method | Path | Purpose |
 |---|---|---|
 | GET | `/api/health` | DB/storage status, version, which pipeline modules are implemented |
-| GET | `/api/reference-data` | Stores, SKUs, fulfillment stages, pipeline states (for UIs) |
+| GET | `/api/reference-data` | Stores, SKUs, fulfillment stages, pipeline states, defect types, decision outcomes (for UIs) |
 | POST | `/api/inspections` | Create inspection → `CREATED` |
 | GET | `/api/inspections` | List (filters: `store_id`, `sku_id`, `stage`, `status`; `limit`, `offset`) |
 | GET | `/api/inspections/{id}` | Inspection + module results + pipeline history |
 | GET | `/api/inspections/{id}/pipeline` | Fulfillment history of the item/order: stage timeline + first-defect attribution |
 | GET | `/api/inspections/{id}/rca` | GenAI RCA grounded in that evidence (facts + labelled AI hypotheses; safe fallback) + `rag`: retrieved SOP sources and cited SOP-grounded actions |
 | POST | `/api/inspections/{id}/image` | Upload image (multipart `file`) → validate, store, run pipeline |
-| POST | `/api/inspections/{id}/feedback` | Operator verdict/corrections (resolves `REQUIRES_REVIEW`) |
+| POST | `/api/inspections/{id}/feedback` | Operator verdict + structured review of each AI layer; AI snapshot stored next to corrections (resolves `REQUIRES_REVIEW`) |
+| GET | `/api/inspections/{id}/feedback` | Every feedback submission for the inspection (oldest first) |
+| GET | `/api/feedback/analysis` | Error analysis: overrides, defect / stage corrections, RCA / action usefulness |
+| GET | `/api/feedback/learning-candidates` | AI vs operator values per reviewed inspection, for human curation |
 
 ```bash
 curl -X POST localhost:8000/api/inspections -H 'content-type: application/json' \
@@ -1113,6 +1216,20 @@ Alembic migrations, and a full persisted lifecycle.
 * pipeline routing: COMPLETED, ATTRIBUTION_REQUIRES_REVIEW, LLM unavailable;
 * the canonical demo end to end with real YOLO inference.
 
+**RAG tests** (`tests/rag/`) cover ingestion and validation, retrieval quality on the demo corpus, citation and
+quote guardrails, prompt-injection delimiting, every fallback, the API / health / pipeline routing, and the
+canonical demo (operator-feedback path and real YOLO inference).
+
+**Feedback tests** (`tests/feedback/`) cover:
+* each review layer (correct and corrected) and RCA / action usefulness;
+* invalid enums, internal fields, inconsistent reviews and reviews of layers the AI did not produce;
+* normal, special-character and prompt-injection comments (stored verbatim, escaped in the RCA prompt);
+* AI result immutability and history preservation;
+* aggregation counts and candidate export (API + CLI);
+* migration `0003` upgrade / downgrade with existing rows (SQLite + PostgreSQL);
+* "feedback changes no production behaviour";
+* the canonical demo with real YOLO inference followed by an operator review and a stage override.
+
 ## Roadmap
 
 | Part | Scope | Status |
@@ -1121,8 +1238,8 @@ Alembic migrations, and a full persisted lifecycle.
 | 2 | Computer Vision (YOLOv8 `CVEngine`, basic quality gate, decision rules, dataset/training/eval tooling) | ✅ (demo model: synthetic data only) |
 | 3 | Fulfillment Pipeline Intelligence (stage history, first-defect attribution, evidence levels) | ✅ |
 | 4 | GenAI Root-Cause Analysis (grounded hypotheses, corrective actions, safe fallback) | ✅ |
-| **5** | RAG / SOP Intelligence (demo SOP knowledge base, retrieval, cited SOP-grounded actions) | ✅ this commit (demo SOPs only) |
-| 6 | Active Learning (feedback review → labelled data → retraining → model versions) | planned |
+| 5 | RAG / SOP Intelligence (demo SOP knowledge base, retrieval, cited SOP-grounded actions) | ✅ (demo SOPs only) |
+| **6** | Operator Feedback & Learning Loop (structured review, error analysis, candidate export; no automatic retraining) | ✅ this commit |
 | 7 | Minimal security + production hardening (operator auth/roles, async workers, object storage) | planned |
 | later | Image Quality Gate, advanced (glare, framing/occlusion, product-in-frame, retake UX) | planned |
 
@@ -1131,6 +1248,12 @@ Alembic migrations, and a full persisted lifecycle.
 * **No real-world model.** The only trained model learned from synthetic cartoon scenes. Expect it to perform
   poorly on real photos until it is retrained on a real annotated dataset. Its metrics are demo metrics.
 * 5 of 10 taxonomy classes have no data at all (`placeholder`), and `wrong_item` needs SKU reference matching.
+* Operator feedback:
+  * there is no automatic retraining or rule change: improvements need a person to curate candidates and decide;
+  * candidates are not a training set: labels are single-operator, unverified, and may disagree between operators
+    (statistics use the latest submission per inspection);
+  * operators are not authenticated beyond the optional API key; `operator_id` is self-declared;
+  * no UI for moving `learning_status` through curation yet (the field and export exist).
 * RAG / SOP:
   * the knowledge base is 9 DEMO / SYNTHETIC documents, not approved SOPs; replace them before real use;
   * the default hashing embedding is lexical: it misses paraphrases with no shared words, and its threshold is
