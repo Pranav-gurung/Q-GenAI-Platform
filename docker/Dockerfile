@@ -12,9 +12,10 @@ COPY alembic.ini ./
 COPY scripts ./scripts
 COPY frontend ./frontend
 COPY data/samples ./data/samples
+COPY knowledge ./knowledge
 COPY docker/entrypoint.sh /entrypoint.sh
 
-RUN useradd --create-home --uid 10001 app && mkdir -p /app/data/raw/images && chown -R app /app/data \
+RUN useradd --create-home --uid 10001 app && mkdir -p /app/data/raw/images /app/data/rag && chown -R app /app/data \
     && chmod +x /entrypoint.sh
 USER app
 

@@ -126,7 +126,29 @@ function listBlock(title, items, cls, fmt = (x) => x) {
   return wrap;
 }
 
-// RCA: system facts (deterministic) and AI hypotheses are rendered in separate, labelled lists.
+function section(title, cls, ...children) {
+  const sec = document.createElement("div"); sec.className = `rca-section ${cls}`;
+  const h = document.createElement("h4"); h.textContent = title;
+  sec.append(h, ...children);
+  return sec;
+}
+
+const RAG_TONE = { GROUNDED: "ok", NOT_SUPPORTED: "warn", SOURCES_ONLY: "warn", NO_RELEVANT_SOURCE: "warn",
+                   UNAVAILABLE: "bad", NOT_APPLICABLE: "neutral" };
+
+// SOP-grounded actions: each shows its source document, section and version (filled from the index, not the LLM).
+function sopActions(actions) {
+  const ul = document.createElement("ul"); ul.className = "sop-actions";
+  for (const a of actions) {
+    const li = document.createElement("li"); li.textContent = `${a.action} (${a.priority})`;
+    const src = document.createElement("span"); src.className = "sop-source";
+    src.textContent = `Source: ${a.source_document} · Section: ${a.source_section} · Version: ${a.source_version}`;
+    li.append(src); ul.append(li);
+  }
+  return ul;
+}
+
+// RCA: system evidence, GenAI hypotheses and SOP-grounded actions are rendered as three separate, labelled sections.
 function renderRCA(rca, inspectionId) {
   const box = document.getElementById("r-rca");
   const btn = document.getElementById("r-rca-generate");
@@ -143,6 +165,7 @@ function renderRCA(rca, inspectionId) {
   defects.replaceChildren();
   document.getElementById("r-rca-summary").textContent = rca?.summary ?? "";
   document.getElementById("r-rca-disclaimer").textContent = rca?.disclaimer ?? "";
+  renderRAG(rca?.rag);
   if (!rca) { meta.textContent = "No RCA was generated during this inspection."; return; }
   const g = rca.generation;
   meta.textContent = rca.status === "COMPLETED"
@@ -151,19 +174,52 @@ function renderRCA(rca, inspectionId) {
     : rca.status === "NOT_APPLICABLE" ? "No defect in this item's history: nothing to explain."
     : `GenAI RCA ${rca.status.toLowerCase().replace("_", " ")} (${g.error_code}). Deterministic results above are ` +
       "unaffected; the inspection requires human review.";
+  const rag = rca.rag;
   for (const d of rca.defects) {
     const card = document.createElement("div"); card.className = "rca-block";
     const h = document.createElement("strong");
     h.textContent = `${d.defect_type} · first observed ${d.facts.first_observed_stage} · last known good ` +
       `${d.facts.last_known_good_stage ?? "none"} · evidence ${d.facts.evidence_level}`;
+    const unsupported = new Set((rag?.unsupported_actions ?? []).filter(u => u.defect_type === d.defect_type).map(u => u.action));
+    const aiActions = rag ? d.corrective_actions.filter(a => unsupported.has(a.action)) : d.corrective_actions;
     card.append(h,
-      listBlock("Observed evidence (system facts)", d.observed_evidence, "rca-facts"),
-      listBlock("Likely contributing causes (AI hypotheses)", d.likely_causes, "rca-ai", c => `${c.hypothesis} [${c.category}]`),
-      listBlock("Corrective actions (AI-suggested)", d.corrective_actions, "rca-ai", a => `${a.action} (${a.priority})`),
-      listBlock("Verification steps (AI-suggested)", d.verification_steps, "rca-ai"),
-      listBlock("Limitations", [...d.limitations, ...d.ai_limitations], "rca-facts"));
+      section("Observed Evidence (system)", "facts",
+        listBlock("Facts", d.observed_evidence, "rca-facts"),
+        listBlock("Limitations", d.limitations, "rca-facts")),
+      section("GenAI Analysis (hypotheses, not facts)", "genai",
+        listBlock("Likely contributing causes", d.likely_causes, "rca-ai", c => `${c.hypothesis} [${c.category}]`),
+        listBlock(rag ? "AI-suggested actions - not SOP-backed" : "Corrective actions (AI-suggested)", aiActions, "rca-ai",
+                  a => `${a.action} (${a.priority})`),
+        listBlock("Verification steps", d.verification_steps, "rca-ai"),
+        listBlock("Model-stated limitations", d.ai_limitations, "rca-ai")));
+    if (rag) {
+      const grounded = rag.grounded_actions.filter(a => a.defect_type === d.defect_type);
+      const dg = rag.defects.find(x => x.defect_type === d.defect_type);
+      const body = grounded.length ? sopActions(grounded) : Object.assign(document.createElement("p"),
+        { className: "meta", textContent: dg?.message ?? rag.message ?? "No SOP-backed actions." });
+      card.append(section("SOP-Grounded Actions", "sop", body));
+    }
     defects.append(card);
   }
+}
+
+function renderRAG(rag) {
+  const meta = document.getElementById("r-rag-meta");
+  const box = document.getElementById("r-rag-sources");
+  meta.hidden = box.hidden = !rag;
+  if (!rag) return;
+  const badge = document.getElementById("r-rag-badge");
+  badge.textContent = rag.status.replaceAll("_", " ");
+  badge.style.color = `var(--${RAG_TONE[rag.status] ?? "neutral"})`;
+  document.getElementById("r-rag-message").textContent =
+    (rag.requires_review ? "· manual review recommended " : "") + (rag.message ? `· ${rag.message}` : "");
+  const ul = box.querySelector("ul"); ul.replaceChildren();
+  for (const s of rag.retrieved_sources) {
+    const li = document.createElement("li");
+    li.textContent = `${s.title} · ${s.section} · ${s.version} (${s.provenance}) · similarity ${s.similarity.toFixed(2)}`;
+    ul.append(li);
+  }
+  document.getElementById("r-rag-disclaimer").textContent = rag.disclaimer;
 }
 
 function render(insp, file) {

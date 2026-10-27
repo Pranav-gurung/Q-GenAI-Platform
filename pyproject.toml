@@ -19,7 +19,7 @@ dependencies = [
     "python-multipart>=0.0.9",
     "pillow>=10.3",
     "numpy>=1.26",          # image quality gate, CV postprocessing
-    "pyyaml>=6.0",          # defect taxonomy / dataset definitions
+    "pyyaml>=6.0",          # defect taxonomy / dataset definitions, SOP front matter
 ]
 
 [project.optional-dependencies]
@@ -37,6 +37,11 @@ cv = [
 # GenAI root-cause analysis with LLM_PROVIDER=anthropic (Part 4)
 llm = [
     "anthropic>=2.3",
+]
+# Optional neural embeddings for RAG (RAG_EMBEDDING_PROVIDER=sentence_transformers; downloads a model from
+# Hugging Face on first use). The default "hashing" provider needs only numpy.
+rag-neural = [
+    "sentence-transformers>=3.0",
 ]
 # Optional ONNX export (python -m ml.cv.export)
 cv-export = [

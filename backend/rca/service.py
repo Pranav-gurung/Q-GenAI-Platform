@@ -1,4 +1,5 @@
-"""RCAService: evidence -> provider -> validation -> RootCauseAnalysis. Never raises for LLM problems.
+"""RCAService: evidence -> provider -> validation -> RootCauseAnalysis (-> RAG SOP grounding). Never raises for
+LLM problems.
 
   no defect in the trace          -> NOT_APPLICABLE (no LLM call)
   LLM disabled / provider error   -> UNAVAILABLE    (deterministic facts kept, AI fields empty, requires_review)
@@ -16,6 +17,7 @@ from pydantic import ValidationError
 
 from backend.core.config import Settings
 from backend.core.logging import log_pipeline
+from backend.rag.service import RAGService
 from backend.rca import evidence as ev
 from backend.rca.guardrails import GroundingViolation, check_output
 from backend.rca.prompt import PROMPT_VERSION, build_prompt
@@ -29,9 +31,11 @@ REVIEW_ATTRIBUTIONS = (AttributionStatus.REQUIRES_REVIEW, AttributionStatus.INSU
 
 
 class RCAService:
-    def __init__(self, settings: Settings, provider: LLMProvider | None = None) -> None:
+    def __init__(self, settings: Settings, provider: LLMProvider | None = None, rag: RAGService | None = None) -> None:
         self.settings = settings
         self.provider = provider if provider is not None else (build_provider(settings) if settings.llm_enabled else None)
+        # SOP grounding runs after the RCA and shares its provider (one LLM configuration).
+        self.rag = rag if rag is not None else RAGService(settings, self.provider)
         if settings.llm_temperature is not None and settings.llm_provider == "anthropic":
             logger.warning("LLM_TEMPERATURE is set but not sent: the Anthropic API rejects sampling parameters")
 
@@ -47,6 +51,13 @@ class RCAService:
 
     # ------------------------------------------------------------------------------------------------
     def analyze(self, trace: FulfillmentTraceAnalysis, operator_notes: list[OperatorNote] | None = None) -> RootCauseAnalysis:
+        rca = self._analyze(trace, operator_notes)
+        if self.rag.settings.rag_enabled and rca.status is not RCAStatus.NOT_APPLICABLE:
+            # Retrieval also runs when the RCA is unavailable: the query falls back to the deterministic facts.
+            rca.rag = self.rag.ground(trace, rca)
+        return rca
+
+    def _analyze(self, trace: FulfillmentTraceAnalysis, operator_notes: list[OperatorNote] | None) -> RootCauseAnalysis:
         evidence = ev.build_evidence(trace, operator_notes)
         defects = [DefectRCA(defect_type=a.defect_type, facts=ev.defect_facts(trace, a),
                              observed_evidence=[ev.timeline_sentence(trace), *ev.observed_evidence(trace, a)],

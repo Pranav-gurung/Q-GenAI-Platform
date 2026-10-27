@@ -2,14 +2,15 @@
 
 **Computer-vision-first quality intelligence for quick-commerce dark stores.**
 
-> **Status: Part 4 of 7, GenAI Root-Cause Analysis** (on top of Parts 1-3: foundation + pipeline, computer
-> vision, fulfillment pipeline intelligence). Implemented: inspection pipeline, API, database, operator UI, an
-> image quality gate, a **real YOLOv8 CV engine**, deterministic decision rules, dataset / training / evaluation
-> tooling, **deterministic first-defect stage attribution**, and an **evidence-grounded GenAI RCA** that only adds
-> labelled hypotheses, actions and checks.
+> **Status: Part 5 of 7, RAG / SOP Intelligence** (on top of Parts 1-4: foundation + pipeline, computer
+> vision, fulfillment pipeline intelligence, GenAI RCA). Implemented: inspection pipeline, API, database, operator
+> UI, an image quality gate, a **real YOLOv8 CV engine**, deterministic decision rules, dataset / training /
+> evaluation tooling, **deterministic first-defect stage attribution**, an **evidence-grounded GenAI RCA** that
+> only adds labelled hypotheses, actions and checks, and **SOP-grounded corrective actions** retrieved from a
+> DEMO / SYNTHETIC knowledge base with citations.
 > **The only trained model is a demo model trained on SYNTHETIC data.** It proves the engineering end to end.
 > It is **not** evidence of accuracy on real product photos (see [Computer Vision](#computer-vision-part-2)).
-> RAG / SOP retrieval and active learning are not implemented yet.
+> The SOP knowledge base is demo content, not any company's real SOPs. Active learning is not implemented yet.
 
 ---
 
@@ -78,7 +79,7 @@ a **PipelineOrchestrator**. Each AI capability is a plug-in module behind a type
                 └────────┬────────┘
                          ▼
                 ┌─────────────────┐
-                │ SOP / Corrective│   ActionEngine       → rca (Part 4 ✅; SOP/RAG: Part 5)
+                │ SOP / Corrective│   ActionEngine       → rca + RAG SOP grounding (Part 5 ✅)
                 │ Action          │
                 └────────┬────────┘
                          ▼
@@ -122,8 +123,9 @@ a **PipelineOrchestrator**. Each AI capability is a plug-in module behind a type
 | **Part 2:** Dataset validator, synthetic demo data, training, evaluation, predict, visualize, benchmark, ONNX export | ✅ | `ml/cv/*.py` |
 | **Part 3:** Fulfillment stage history + deterministic first-defect attribution (`PIPELINE_ANALYSIS_ENGINE=deterministic`), `GET /api/inspections/{id}/pipeline`, UI timeline | ✅ | `backend/fulfillment/`, `backend/services/fulfillment_service.py` |
 | **Part 4:** Evidence-grounded GenAI RCA (`RCA_ENGINE=genai`, `ACTION_ENGINE=rca`), LLM provider abstraction (Anthropic + mock), guardrails, `GET /api/inspections/{id}/rca`, UI panel | ✅ | `backend/rca/`, `backend/services/rca_service.py` |
+| **Part 5:** RAG / SOP intelligence (`RAG_ENABLED`): demo SOP knowledge base, ingestion + validation, section chunking, embeddings, local vector index, retrieval, cited SOP-grounded actions, citation guardrails, health, UI | ✅ | `knowledge/`, `backend/rag/`, `backend/schemas/rag.py` |
 
-**Not implemented yet (by design):** RAG / vector DB / SOP retrieval,
+**Not implemented yet (by design):** a vector database (a local numpy index is enough here), real approved SOPs,
 active-learning training, analytics dashboards, user accounts / RBAC. Also not implemented: any model trained
 on real product photos.
 
@@ -156,7 +158,7 @@ q-genai/
 ├── frontend/                 static operator UI (no build step), served at /
 ├── data/                     raw/ processed/ feedback/ cv/ (git-ignored), samples/ (simulated data)
 ├── artifacts/cv/             trained model versions (git-ignored)
-├── documents/                future SOP corpus for RAG (Part 5)
+├── knowledge/                DEMO / SYNTHETIC SOP knowledge base for RAG (Part 5)
 ├── scripts/                  seed_sample_data.py, smoke_test.sh
 ├── docker/                   Dockerfile, entrypoint (migrate → seed → serve)
 └── tests/                    unit/ api/ integration/ cv/
@@ -504,7 +506,7 @@ Each layer answers one question, and none of them answers another layer's:
 | Computer vision | What is visually present in this image? | `CV_ENGINE=yolov8` |
 | Decision rules | Does this observation pass, fail or need review? | `DECISION_ENGINE=rules` |
 | **Fulfillment analysis** | **Across the item's observations, when did each defect first appear?** | `PIPELINE_ANALYSIS_ENGINE=deterministic` |
-| RCA (Part 5) | Why might it have happened, and what should operators do? | not implemented |
+| RCA + SOP grounding (Parts 4-5) | Why might it have happened, and what do the SOPs say to do? | `RCA_ENGINE=genai`, `RAG_ENABLED=true` |
 
 Fulfillment analysis is pure, deterministic code (`backend/fulfillment/`). It uses no ML, no LLM and no
 probabilities. The same observations always give the same result.
@@ -624,8 +626,8 @@ identity unambiguous, timestamps consistent, first observation confirmed.
   `order_id` filters. Migration `0002` adds the nullable, indexed `inspections.item_id` column. No analysis
   table: results are reconstructed from existing data.
 * **UI:** the inspection panel shows the stage timeline and one card per defect: first observed, last known good,
-  stages not inspected, evidence, and whether the current stage is supported. It does not show root cause
-  (Part 5).
+  stages not inspected, evidence, and whether the current stage is supported. Root-cause hypotheses are the
+  separate GenAI RCA panel (Part 4).
 
 ```json
 {"defect_type": "CRUSHED_PACKAGE", "classification": "NEW_DEFECT", "attribution_status": "ATTRIBUTED",
@@ -771,6 +773,165 @@ After the fulfillment timeline, a **"GenAI RCA · AI-generated · evidence-groun
 * a provider/model line ("Deterministic MOCK provider (not AI)" for the mock);
 * when unavailable, the reason, and a button to regenerate via `GET /rca`.
 
+## RAG / SOP Intelligence (Part 5)
+
+> **DEMO / SYNTHETIC knowledge base.** The 9 documents in [`knowledge/`](knowledge/README.md) were written for
+> this project. They are **not** official SOPs of Blinkit, Zepto, Swiggy Instamart, Amazon or any other company,
+> and every document and every API response says so (`provenance: DEMO_SYNTHETIC`).
+
+Part 4 suggests corrective actions from the model's general knowledge. Part 5 checks those actions against the
+store's SOP knowledge base. It retrieves the relevant SOP sections and keeps only actions that a retrieved section
+supports, each with a citation and a verbatim quote. It is the same RCA process with one more step, not a
+second pipeline:
+
+```
+Part 3 trace analysis ─► Part 4 RCA (hypotheses + AI actions) ─► retrieval (per defect) ─► LLM grounding call
+                                                                        │                       │
+                                                         no source ≥ threshold          citation guardrails
+                                                                        ▼                       ▼
+                                                         NO_RELEVANT_SOURCE        GROUNDED / NOT_SUPPORTED
+                                                         (no LLM call)             (+ SOURCES_ONLY on failure)
+```
+
+### Four kinds of content, never mixed
+
+| Kind | Where | Produced by |
+|---|---|---|
+| **System evidence** | `defects[].facts`, `observed_evidence` | deterministic (CV, rules, Part 3) |
+| **GenAI hypothesis** | `defects[].likely_causes`, `corrective_actions`, `verification_steps` | LLM (Part 4), labelled AI |
+| **SOP-backed recommendation** | `rag.grounded_actions[]` (action + `source_document`, `source_section`, `source_version`, `supporting_quote`) | LLM wording, tied to a retrieved chunk; source metadata filled **from the index, never by the LLM** |
+| **Unsupported AI action** | `rag.unsupported_actions[]` | Part 4 actions no retrieved SOP supports, explicitly "not SOP-backed" |
+
+### Ingestion
+
+`python -m backend.rag.ingest` (also run by the Docker entrypoint when `RAG_ENABLED=true`):
+
+1. **Load** every `knowledge/**/*.md` (sorted, deterministic).
+2. **Validate** front matter (`document_id`, `title`, `stage`, `document_type`, `version`, `defect_types`,
+   `provenance`) with a strict Pydantic model. Errors: `MISSING_FRONT_MATTER`, `INVALID_METADATA`,
+   `NO_SECTIONS`, `DUPLICATE_DOCUMENT_ID`, `DUPLICATE_SECTION`, `EMPTY_KNOWLEDGE_BASE`,
+   `KNOWLEDGE_BASE_MISSING`; any error exits 1 and writes no index. Warnings: `DUPLICATE_CONTENT` (skipped),
+   `SUSPICIOUS_INSTRUCTION_TEXT` (kept, treated as data).
+3. **Chunk by section**: each `## ` section is one chunk with a stable id `DOCUMENT-ID#section-slug`, carrying all
+   document metadata. Sections longer than `RAG_MAX_CHUNK_CHARS` split on line boundaries (`-1`, `-2`, …).
+4. **Embed** title + section + stage + defect words + text.
+5. **Store** in a local index directory: `vectors.npy` + `chunks.json` + `manifest.json` (provider, model, dim,
+   corpus SHA-256, document versions, provenance, build time), written atomically.
+
+Demo corpus: 9 documents → 66 chunks.
+
+### Embeddings and vector store
+
+* **Default: `hashing`.** A signed feature-hashing embedding (BLAKE2b) of normalised word stems, a small
+  domain synonym map (leak/seep/wet, seal/sealer, …) and bigrams. It uses 2048 dims, sublinear TF and L2
+  normalisation. It is a lexical embedding: deterministic, offline, numpy only, and with no model download. It
+  matches on shared vocabulary, not meaning.
+* **Optional: `sentence_transformers`** (`pip install -e '.[rag-neural]'`, e.g.
+  `RAG_EMBEDDING_MODEL=sentence-transformers/all-MiniLM-L6-v2`), behind the same `EmbeddingProvider` interface.
+  **Untested:** Hugging Face was unreachable from the build environment. If it cannot load, RAG reports
+  `UNAVAILABLE` (`EMBEDDING_DEPENDENCIES_MISSING` / `EMBEDDING_MODEL_UNAVAILABLE`).
+* The service refuses an index built with a different provider/model/dim (`INDEX_EMBEDDING_MISMATCH`). After
+  changing embeddings or documents, re-run the ingest.
+* **Vector store:** brute-force cosine over the in-memory matrix (`local-numpy`). That is exact and well under a
+  millisecond for hundreds of chunks. No vector database is needed at this scale.
+
+### Retrieval strategy
+
+One query per defect type, built from the RCA context: first observed stage, defect type, severity,
+classification, the Part 4 hypotheses and categories, the AI actions, the summary, and an action vocabulary
+("corrective actions, immediate actions, required checks, verification, escalation"). When the LLM is
+unavailable, the query falls back to the deterministic facts only. Then:
+
+1. **Similarity gate:** drop chunks with cosine < `RAG_MIN_SIMILARITY` (raw similarity, before any boost).
+2. **Skip context sections** (`Purpose`, `Applicable Stage`): they describe a document, not an action.
+3. **Metadata boosts, not filters:** +0.10 when the chunk's stage is in the defect's Part 3 window (first observed
+   stage, plus uninspected stages unless `PRE_EXISTING`), +0.05 for `GENERAL` documents, +0.10 when the document
+   lists the defect type. A relevant document from another stage can still be retrieved; it just ranks lower.
+4. Sort by score (ties by chunk id; deterministic), keep **at most 2 chunks per document**, and keep `RAG_TOP_K`.
+
+**Threshold calibration (`RAG_MIN_SIMILARITY=0.15`)** on the demo corpus with the hashing embedding: relevant
+queries' top similarity was 0.17–0.36, and unrelated queries' best match was ≤ 0.07. 0.15 sits in the gap.
+Recalibrate for real documents or another embedding model.
+
+### Grounding and citations (prompt `rag-v1`)
+
+* The LLM sees only the retrieved chunks, as escaped JSON inside `<context>` / `<sources>` blocks (`<` and `>`
+  are JSON-escaped, so no document text can close a block). The static system prompt says block content is data
+  and that instructions in documents must be ignored. Operator notes are **not** part of this prompt.
+* The output schema's `chunk_id` enum is **only the retrieved chunk ids**, and `defect_type` is only the
+  analysed defects.
+* Server-side guardrails discard the whole output on any violation:
+  * `CITATION_NOT_RETRIEVED`: cited a chunk not retrieved *for that defect*;
+  * `QUOTE_NOT_IN_SOURCE`: the quote is not verbatim in the cited chunk;
+  * `QUOTE_ACTION_MISMATCH`: the action shares no content word with its quote;
+  * `INSTRUCTION_TEXT`: prompt-injection-like text in the action or quote;
+  * `BAD_RCA_ACTION_INDEX`;
+  * plus Part 4's causal-certainty, invented-number, fabricated-SOP-reference and person-blame checks.
+* `source_document` / `section` / `version` / `provenance` are copied from the index, so citations cannot be
+  invented. There are no URLs: documents are identified by id, section and version.
+
+### Statuses and failures (never fail an inspection)
+
+| `rag.status` | When | Result |
+|---|---|---|
+| `GROUNDED` | ≥ 1 validated SOP-backed action | `requires_review=false` only if every defect is grounded |
+| `NOT_SUPPORTED` | sources found, none supports an action | *"No supporting SOP guidance was found in the available knowledge base for these actions. Manual review is recommended."* |
+| `NO_RELEVANT_SOURCE` | nothing ≥ threshold | no LLM call, no unrelated documents passed; *"No relevant SOP guidance was found … Manual review is recommended."* |
+| `SOURCES_ONLY` | LLM disabled / unavailable / malformed or ungrounded output | sources listed for manual review; no SOP-backed actions; `generation.error_code` says why |
+| `UNAVAILABLE` | KB or index missing / corrupt / mismatched, embeddings unavailable, retrieval error | RCA unaffected; `message` carries the code |
+| *(field `null`)* | `RAG_ENABLED=false` | Part 4 behaviour unchanged |
+
+Pipeline routing: with RAG enabled, a FAIL whose actions are not fully SOP-grounded ends in
+`REQUIRES_REVIEW (SOP_GUIDANCE_REQUIRES_REVIEW)`. `ATTRIBUTION_REQUIRES_REVIEW` still takes precedence. The
+action engine lists SOP-backed actions first (`sop_reference: "PACKING-SOP demo-1.0 §Seal Inspection"`, with the
+quoted SOP text), then AI-only actions marked *"not SOP-backed"*.
+
+### Canonical example
+
+RECEIVING, STORAGE and PICKING PASS; PACKING FAIL with `LEAKING_PACKAGE`. Part 3 gives first observed PACKING,
+last known good PICKING, HIGH evidence. Part 4 hypothesises a sealing-process issue. RAG retrieves
+`PACKING-SOP#seal-inspection` among others, and returns:
+
+```json
+{"defect_type": "LEAKING_PACKAGE",
+ "action": "Inspect sealing equipment and verify seal integrity before releasing affected inventory",
+ "source_document": "Packing and Sealing SOP", "source_section": "Seal Inspection", "source_version": "demo-1.0",
+ "source_provenance": "DEMO_SYNTHETIC",
+ "supporting_quote": "Inspect sealing equipment and verify seal integrity before releasing affected inventory.",
+ "supports_rca_action": "Inspect the sealing equipment and settings at PACKING"}
+```
+
+This is tested end to end with the operator-feedback path (always run) and with the **real trained YOLO model**
+detecting the leak (`tests/rag/test_rag_real_cv.py`, skipped if the demo model is not trained).
+
+### Latency (CPU, demo corpus, hashing embeddings, mock LLM)
+
+| Step | Median | p95 |
+|---|---|---|
+| Ingestion (load + validate + chunk + embed, 9 docs / 66 chunks) | 21.8 ms | 28.1 ms |
+| … of which embedding 66 chunks | 10.5 ms | 13.6 ms |
+| One retrieval | 0.25 ms | 0.33 ms |
+| RAG step (retrieval + grounding call + guardrails) | 2.1 ms | 3.4 ms |
+| RCA + RAG total | 3.2 ms | 4.8 ms |
+
+With the real Anthropic provider, the grounding call adds one more LLM round trip per `GET /rca`. That latency is
+unmeasured: no API key was available.
+
+### API, health, UI, logs
+
+* `GET /api/inspections/{id}/rca` now includes `rag` (status, defects, `retrieved_sources[]`,
+  `grounded_actions[]`, `unsupported_actions[]`, knowledge-base metadata, retrieval latency, generation). The
+  pipeline result carries the same object.
+* `GET /api/health` → `rag: {enabled, embedding_provider, embedding_model, vector_store, documents, chunks,
+  dimensions, status: disabled|ready|unavailable, error}`, with no document text or secrets. Health is `degraded`
+  when RAG is enabled but unavailable.
+* UI: the RCA panel shows a RAG status badge and three sections per defect: **Observed Evidence (system)**,
+  **GenAI Analysis (hypotheses, not facts)** (including the AI actions that are *not SOP-backed*) and
+  **SOP-Grounded Actions** (✓ action with *Source · Section · Version* underneath). Retrieved sources are in a
+  collapsible list.
+* Logs: inspection id, defect, stage, retrieval count, top similarity, status, latency and counts. They never
+  include document text, prompts or keys.
+
 ## Local setup
 
 Requirements: Python 3.11+, and either PostgreSQL 14+ or nothing (SQLite fallback). Docker is optional.
@@ -841,6 +1002,10 @@ End-to-end smoke test against a running server: `scripts/smoke_test.sh http://lo
 | `LLM_MAX_TOKENS` / `LLM_TIMEOUT_SECONDS` / `LLM_EFFORT` | `8000` / `30` / `low` | Output budget (incl. thinking), request timeout, effort level |
 | `LLM_REFUSAL_FALLBACK` | `true` | Anthropic server-side fallback on safety-classifier refusals |
 | `LLM_TEMPERATURE` | *(unset)* | Accepted but not sent (the API rejects sampling parameters) |
+| `RAG_ENABLED` | `false` | Ground RCA actions in the SOP knowledge base (build the index first: `python -m backend.rag.ingest`) |
+| `RAG_KNOWLEDGE_PATH` / `RAG_INDEX_PATH` | `knowledge` / `data/rag/index` | Documents / local vector index (git-ignored) |
+| `RAG_EMBEDDING_PROVIDER` / `RAG_EMBEDDING_MODEL` / `RAG_EMBEDDING_DIM` | `hashing` / `hashing-lexical-v1` / `2048` | `sentence_transformers` optional (`.[rag-neural]`, untested here) |
+| `RAG_TOP_K` / `RAG_MIN_SIMILARITY` / `RAG_MAX_CHUNK_CHARS` | `5` / `0.15` / `1200` | Sources per defect, cosine gate (calibrated on the demo corpus), chunk size |
 | `CV_MODEL_PATH` | `artifacts/cv/qgenai-yolov8n-synthetic-v1/model/best.pt` | Model weights |
 | `CV_MODEL_VERSION` | *(from metadata.json)* | Version override |
 | `CV_DEVICE` | `auto` | `auto` / `cpu` / `cuda` / `cuda:N` (an unavailable CUDA device is an error, not a fallback) |
@@ -867,7 +1032,7 @@ All endpoints are under `/api`. Interactive docs with request/response/error sch
 | GET | `/api/inspections` | List (filters: `store_id`, `sku_id`, `stage`, `status`; `limit`, `offset`) |
 | GET | `/api/inspections/{id}` | Inspection + module results + pipeline history |
 | GET | `/api/inspections/{id}/pipeline` | Fulfillment history of the item/order: stage timeline + first-defect attribution |
-| GET | `/api/inspections/{id}/rca` | GenAI RCA grounded in that evidence (facts + labelled AI hypotheses; safe fallback) |
+| GET | `/api/inspections/{id}/rca` | GenAI RCA grounded in that evidence (facts + labelled AI hypotheses; safe fallback) + `rag`: retrieved SOP sources and cited SOP-grounded actions |
 | POST | `/api/inspections/{id}/image` | Upload image (multipart `file`) → validate, store, run pipeline |
 | POST | `/api/inspections/{id}/feedback` | Operator verdict/corrections (resolves `REQUIRES_REVIEW`) |
 
@@ -955,8 +1120,8 @@ Alembic migrations, and a full persisted lifecycle.
 | 1 | Foundation + pipeline architecture | ✅ |
 | 2 | Computer Vision (YOLOv8 `CVEngine`, basic quality gate, decision rules, dataset/training/eval tooling) | ✅ (demo model: synthetic data only) |
 | 3 | Fulfillment Pipeline Intelligence (stage history, first-defect attribution, evidence levels) | ✅ |
-| **4** | GenAI Root-Cause Analysis (grounded hypotheses, corrective actions, safe fallback) | ✅ this commit |
-| 5 | RAG / SOP knowledge base (retrieve approved SOPs to ground corrective actions) | planned |
+| 4 | GenAI Root-Cause Analysis (grounded hypotheses, corrective actions, safe fallback) | ✅ |
+| **5** | RAG / SOP Intelligence (demo SOP knowledge base, retrieval, cited SOP-grounded actions) | ✅ this commit (demo SOPs only) |
 | 6 | Active Learning (feedback review → labelled data → retraining → model versions) | planned |
 | 7 | Minimal security + production hardening (operator auth/roles, async workers, object storage) | planned |
 | later | Image Quality Gate, advanced (glare, framing/occlusion, product-in-frame, retake UX) | planned |
@@ -966,8 +1131,14 @@ Alembic migrations, and a full persisted lifecycle.
 * **No real-world model.** The only trained model learned from synthetic cartoon scenes. Expect it to perform
   poorly on real photos until it is retrained on a real annotated dataset. Its metrics are demo metrics.
 * 5 of 10 taxonomy classes have no data at all (`placeholder`), and `wrong_item` needs SKU reference matching.
+* RAG / SOP:
+  * the knowledge base is 9 DEMO / SYNTHETIC documents, not approved SOPs; replace them before real use;
+  * the default hashing embedding is lexical: it misses paraphrases with no shared words, and its threshold is
+    calibrated only on this corpus. Neural embeddings are wired in but were not tested (no Hugging Face access);
+  * grounding shows that an SOP section supports an action; it does not prove the action fixes the cause;
+  * the quote check is verbatim matching, so a correct paraphrase without a quote is discarded.
 * GenAI RCA:
-  * produces hypotheses only, and has no SOP / policy knowledge (RAG is Part 5);
+  * produces hypotheses only; SOP knowledge comes from Part 5 RAG, whose documents are demo content;
   * the guardrails are pattern-based and can be over-strict (a valid but differently worded answer is discarded)
     or miss creative wording, so a human must still review AI suggestions;
   * each `GET /rca` makes a synchronous LLM call with no caching or rate limiting;

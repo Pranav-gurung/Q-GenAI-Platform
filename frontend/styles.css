@@ -49,3 +49,9 @@ th { color: var(--muted); font-weight: 500; }
 .rca-facts li { list-style: square; } .rca-ai li::marker { content: "◇ "; }
 button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); margin-bottom: 8px; }
 #r-stages { padding-left: 20px; margin: 0; } #r-stages li { margin-bottom: 4px; } #r-stages small { color: var(--muted); display: block; }
+.rca-section { border-left: 3px solid var(--border); padding-left: 8px; margin-top: 8px; }
+.rca-section.sop { border-left-color: var(--ok); } .rca-section.genai { border-left-color: var(--warn); }
+.rca-section > h4:first-child { color: var(--text); }
+.sop-actions li { list-style: none; margin-left: -18px; } .sop-actions li::before { content: "\2713  "; color: var(--ok); font-weight: 700; }
+.sop-source { display: block; color: var(--muted); font-size: .8rem; }
+.rag-sources { font-size: .85rem; padding-left: 18px; }

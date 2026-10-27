@@ -79,6 +79,17 @@ class Settings(BaseSettings):
     # Severity: boxes covering >= this fraction of the image escalate severity by one level
     cv_severity_large_area_ratio: float = Field(0.20, gt=0, le=1)
 
+    # RAG / SOP intelligence (Part 5): grounds the RCA's corrective actions in retrieved SOP sections.
+    rag_enabled: bool = False
+    rag_knowledge_path: Path = Path("knowledge")
+    rag_index_path: Path = Path("data/rag/index")
+    rag_embedding_provider: str = Field("hashing", pattern="^(hashing|sentence_transformers)$")
+    rag_embedding_model: str = "hashing-lexical-v1"   # sentence_transformers: a LOCAL model directory or model id
+    rag_embedding_dim: int = Field(2048, ge=64, le=65536)  # hashing provider only
+    rag_top_k: int = Field(5, ge=1, le=20)                 # chunks kept per defect type
+    rag_min_similarity: float = Field(0.15, ge=0, le=1)    # raw cosine gate (calibrated on the demo corpus)
+    rag_max_chunk_chars: int = Field(1200, ge=200, le=8000)
+
     # Image quality gate (QUALITY_GATE_ENGINE=basic). Conservative: reject only unusable images.
     cv_min_image_width: int = Field(128, ge=1)
     cv_min_image_height: int = Field(128, ge=1)

@@ -1,4 +1,4 @@
 # documents/
 
-Reserved for SOPs and handling guidelines used by RAG / corrective actions (Part 5).
-Only add documents you are authorised to use. Nothing here is read by the Part 1 code.
+Superseded in Part 5: the SOP knowledge base used by RAG lives in [`knowledge/`](../knowledge/README.md).
+Nothing in this directory is read by the code.

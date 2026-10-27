@@ -10,8 +10,10 @@ import json
 import re
 
 from backend.rca.prompt import RCAPrompt, evidence_from_user_message
+from backend.rag.prompt import PROMPT_VERSION as RAG_PROMPT_VERSION, blocks_from_user_message
 from backend.rca.providers.base import LLMCompletion, LLMError
 
+RAG_MODES = ("ok", "fake_citation", "fake_quote", "borrowed_citation", "rag_malformed", "no_support")
 MODES = ("ok", "malformed_json", "schema_violation", "oversized", "unhedged", "blame_outside_window",
          "wrong_defect", "fake_sop", "timeout", "unavailable", "rate_limited", "api_error", "refused")
 
@@ -103,13 +105,47 @@ def build_output(ev: dict) -> dict:
     return {"summary": summary, "findings": findings}
 
 
+_BULLET = re.compile(r"^\s*(?:[-*]|\d+\.)\s+(.+?)\s*$")
+
+
+def build_grounding(context: list[dict], sources: list[dict], max_per_defect: int = 6) -> dict:
+    """rag-v1 double: copy imperative bullet lines from each defect's retrieved chunks as action + verbatim quote,
+    and link them to the Part 4 action sharing the most content words (>= 3). Skips text the guardrails reject."""
+    from backend.rag.documents import SUSPICIOUS
+    from backend.rag.embeddings import tokens
+    from backend.rca.guardrails import CERTAINTY, NUMBER, PERSON, REFERENCE
+    text = {s["chunk_id"]: s["text"] for s in sources}
+    out = []
+    for d in context:
+        rca = [(a["index"], set(tokens(a["action"]))) for a in d.get("suggested_actions", [])]
+        picked = []
+        for cid in d["source_chunk_ids"]:
+            for line in text.get(cid, "").splitlines():
+                m = _BULLET.match(line)
+                if not m or len(picked) >= max_per_defect:
+                    continue
+                quote = m.group(1).strip()[:300]
+                if len(quote) < 12 or any(rx.search(quote) for rx in (CERTAINTY, NUMBER, PERSON, REFERENCE, SUSPICIOUS)):
+                    continue
+                words = set(tokens(quote))
+                best = max(rca, key=lambda r: (len(r[1] & words), -r[0]), default=None)
+                idx = best[0] if best and len(best[1] & words) >= 3 else None
+                picked.append({"defect_type": d["defect_type"], "action": quote.rstrip("."), "chunk_id": cid,
+                               "quote": quote, "rca_action_index": idx,
+                               "priority": "HIGH" if d.get("evidence_level") == "HIGH" else "MEDIUM"})
+            if len(picked) >= max_per_defect:
+                break
+        out.extend(picked)
+    return {"grounded_actions": out}
+
+
 class MockProvider:
     name = "mock"
 
-    def __init__(self, mode: str = "ok", model: str = "mock-rca-1") -> None:
-        if mode not in MODES:
-            raise ValueError(f"unknown mock mode {mode!r}")
-        self.mode, self.model = mode, model
+    def __init__(self, mode: str = "ok", model: str = "mock-rca-1", rag_mode: str = "ok") -> None:
+        if mode not in MODES or rag_mode not in RAG_MODES:
+            raise ValueError(f"unknown mock mode {mode!r}/{rag_mode!r}")
+        self.mode, self.model, self.rag_mode = mode, model, rag_mode
         self.requests: list[RCAPrompt] = []  # what the "LLM" received (grounding tests)
 
     def status(self) -> str:
@@ -123,6 +159,8 @@ class MockProvider:
             raise LLMError(failures[self.mode], f"simulated {self.mode}")
         if self.mode == "malformed_json":
             return LLMCompletion(text='{"summary": "truncated', model=self.model)
+        if prompt.prompt_version == RAG_PROMPT_VERSION:
+            return self._ground(prompt)
         out = build_output(evidence_from_user_message(prompt.user))
         f = out["findings"][0]
         if self.mode == "schema_violation":
@@ -139,3 +177,20 @@ class MockProvider:
             f["corrective_actions"][0]["action"] = "Follow SOP-PK-17 section 4 for resealing"
         return LLMCompletion(text=json.dumps(out), model=self.model, input_tokens=len(prompt.user) // 4,
                              output_tokens=len(json.dumps(out)) // 4, stop_reason="end_turn")
+
+    def _ground(self, prompt: RCAPrompt) -> LLMCompletion:
+        if self.rag_mode == "rag_malformed":
+            return LLMCompletion(text='{"grounded_actions": [{"action": ', model=self.model)
+        context, sources = blocks_from_user_message(prompt.user)
+        out = {"grounded_actions": []} if self.rag_mode == "no_support" else build_grounding(context, sources)
+        acts = out["grounded_actions"]
+        if acts and self.rag_mode == "fake_citation":
+            acts[0]["chunk_id"] = "SOP-PK-17#resealing"
+        elif acts and self.rag_mode == "fake_quote":
+            acts[0]["quote"] = "Always reseal leaking pouches with tape and dispatch them."
+        elif acts and self.rag_mode == "borrowed_citation":
+            other = sorted({s["chunk_id"] for s in sources} - set(context[0]["source_chunk_ids"]))
+            acts[0]["chunk_id"] = other[0] if other else "NOT-RETRIEVED#x"
+        text = json.dumps(out)
+        return LLMCompletion(text=text, model=self.model, input_tokens=len(prompt.user) // 4,
+                             output_tokens=len(text) // 4, stop_reason="end_turn")
