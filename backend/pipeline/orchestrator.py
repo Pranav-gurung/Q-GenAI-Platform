@@ -10,7 +10,9 @@ Routing rules (all based on REAL results only):
                                                      REQUIRES_REVIEW (DECISION_REVIEW); no RCA / action
   * decision FAIL and a corrective action exists  -> COMPLETED, unless the RCA says the stage evidence needs review
                                                      (insufficient / uncertain attribution) -> REQUIRES_REVIEW
-                                                     (ATTRIBUTION_REQUIRES_REVIEW)
+                                                     (ATTRIBUTION_REQUIRES_REVIEW), or RAG is enabled and the actions
+                                                     are not fully SOP-grounded -> REQUIRES_REVIEW
+                                                     (SOP_GUIDANCE_REQUIRES_REVIEW)
   * no real decision (e.g. modules not implemented yet) -> REQUIRES_REVIEW (NO_AUTOMATED_DECISION):
     the system never auto-passes or auto-fails a product it could not actually inspect.
   * a module raises / violates its contract       -> FAILED (MODULE_ERROR / MODULE_CONTRACT_VIOLATION)
@@ -89,6 +91,10 @@ class PipelineOrchestrator:
             if rca is not None and rca.requires_review:
                 return self._finish(ctx, S.REQUIRES_REVIEW, started, "ATTRIBUTION_REQUIRES_REVIEW",
                                     "Corrective actions suggested, but stage attribution evidence requires review")
+            if rca is not None and rca.rag is not None and rca.rag.requires_review:
+                return self._finish(ctx, S.REQUIRES_REVIEW, started, "SOP_GUIDANCE_REQUIRES_REVIEW",
+                                    f"Corrective actions are not fully SOP-grounded ({rca.rag.status.value}); "
+                                    "manual review is recommended")
             return self._finish(ctx, S.COMPLETED, started, message="Decision FAIL with corrective action")
         except _StageFailed as exc:
             ctx.record_error(exc.code, exc.message)

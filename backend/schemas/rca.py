@@ -211,3 +211,9 @@ class RootCauseAnalysis(BaseModel):
     generation: RCAGeneration
     disclaimer: str = ("AI-generated hypotheses grounded in the inspection evidence shown. "
                        + CAUSALITY_DISCLAIMER)
+    rag: RAGResult | None = Field(None, description="SOP grounding of the corrective actions (null if RAG disabled).")
+
+
+from backend.schemas.rag import RAGResult  # noqa: E402  (rag.py imports RCAGeneration from this module)
+
+RootCauseAnalysis.model_rebuild()
