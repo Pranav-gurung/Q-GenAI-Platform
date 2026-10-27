@@ -1,0 +1,87 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Q-GenAI Inspection</title>
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <header>
+    <h1>Q-GenAI <span>Dark-store inspection</span></h1>
+    <p class="note">Computer vision reports visual evidence; the decision comes from deterministic rules. Modules that are not configured or not available say so; nothing is guessed.</p>
+  </header>
+
+  <main>
+    <form id="inspection-form" novalidate>
+      <h2>New inspection</h2>
+      <label>Store <select name="store_id" required></select></label>
+      <label>SKU <select name="sku_id" required></select></label>
+      <label>Fulfillment stage <select name="stage" required></select></label>
+      <label>Item ID <span class="opt">(unit / LPN barcode; links stages)</span> <input name="item_id" placeholder="UNIT-0001" maxlength="64"></label>
+      <label>Order ID <span class="opt">(optional)</span> <input name="order_id" placeholder="ORD-100245" maxlength="64"></label>
+      <label>Operator ID <span class="opt">(optional)</span> <input name="operator_id" placeholder="OP-17" maxlength="64"></label>
+      <label>Product image <input type="file" name="image" accept="image/jpeg,image/png,image/webp" required></label>
+      <img id="preview" alt="" hidden>
+      <button type="submit">Submit inspection</button>
+      <div id="error" class="error" role="alert" hidden></div>
+    </form>
+
+    <section id="result" hidden aria-live="polite">
+      <h2>Inspection</h2>
+      <dl>
+        <dt>Inspection ID</dt><dd id="r-id" class="mono"></dd>
+        <dt>Pipeline status</dt><dd><span id="r-status" class="badge"></span></dd>
+        <dt>Decision</dt><dd id="r-decision"></dd>
+        <dt>Reason</dt><dd id="r-reason"></dd>
+      </dl>
+      <div id="r-cv" hidden>
+        <h3>Computer vision</h3>
+        <p id="r-cv-meta" class="meta"></p>
+        <canvas id="r-canvas" aria-label="Inspected image with detected defects"></canvas>
+        <table id="r-detections">
+          <thead><tr><th>Defect</th><th>Confidence</th><th>Severity</th><th>Box (px)</th></tr></thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div id="r-fulfillment" hidden>
+        <h3>Fulfillment history</h3>
+        <p id="r-trace" class="meta"></p>
+        <ol id="r-timeline" class="timeline"></ol>
+        <div id="r-defects"></div>
+        <p class="meta disclaimer">First <em>observed</em> stage from available inspections; not proof of physical cause.</p>
+      </div>
+      <div id="r-rca" hidden>
+        <h3>GenAI RCA <span class="ai-badge">AI-generated · evidence-grounded</span></h3>
+        <p id="r-rca-meta" class="meta"></p>
+        <p id="r-rca-summary"></p>
+        <p id="r-rag-meta" class="meta" hidden>SOP grounding <span id="r-rag-badge" class="badge"></span>
+          <span id="r-rag-message"></span></p>
+        <div id="r-rca-defects"></div>
+        <details id="r-rag-sources" hidden><summary>Retrieved SOP sources</summary><ul class="rag-sources"></ul>
+          <p class="meta" id="r-rag-disclaimer"></p></details>
+        <button type="button" id="r-rca-generate" class="secondary" hidden>Generate GenAI RCA</button>
+        <p class="meta disclaimer" id="r-rca-disclaimer"></p>
+      </div>
+      <div id="r-review" hidden>
+        <h3>Operator Review</h3>
+        <p class="meta">Your review is stored next to the AI result. It does not change the AI result and nothing is
+          retrained automatically.</p>
+        <div class="review-ai"><h4>AI Result</h4><dl id="r-review-ai"></dl></div>
+        <form id="review-form" novalidate>
+          <div id="review-rows"></div>
+          <label>Operator ID <input name="review_operator" maxlength="64" placeholder="OP-17" required></label>
+          <label>Comment <span class="opt">(optional)</span>
+            <textarea name="review_comment" maxlength="1000" rows="2"></textarea></label>
+          <button type="submit">Submit review</button>
+        </form>
+        <p id="r-review-status" class="meta" role="status"></p>
+        <ul id="r-review-history" class="meta review-history"></ul>
+      </div>
+      <h3>Pipeline stages</h3>
+      <ol id="r-stages"></ol>
+    </section>
+  </main>
+  <script src="app.js"></script>
+</body>
+</html>

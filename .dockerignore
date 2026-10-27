@@ -1,0 +1,15 @@
+.git
+.env
+.env.*
+!.env.example
+**/__pycache__
+.pytest_cache
+.venv
+data
+!data/samples
+tests
+*.db
+artifacts
+runs
+*.pt
+*.onnx

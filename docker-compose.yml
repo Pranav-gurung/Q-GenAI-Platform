@@ -1,0 +1,32 @@
+# Local development stack: PostgreSQL + API (serves the frontend at http://localhost:8000).
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: qgenai
+      POSTGRES_USER: qgenai
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me}   # dev default; override via .env
+    ports: ["5432:5432"]
+    volumes: [pgdata:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U qgenai -d qgenai"]
+      interval: 5s
+      retries: 10
+
+  api:
+    build: { context: ., dockerfile: docker/Dockerfile }
+    depends_on:
+      db: { condition: service_healthy }
+    environment:
+      ENVIRONMENT: development
+      DATABASE_URL: postgresql+psycopg://qgenai:${POSTGRES_PASSWORD:-change-me}@db:5432/qgenai
+      STORAGE_PATH: /app/data/raw/images
+      SEED_SAMPLE_DATA: "true"
+      CORS_ORIGINS: http://localhost:8000
+      LOG_FORMAT: ${LOG_FORMAT:-console}
+    ports: ["8000:8000"]
+    volumes: [images:/app/data/raw/images]
+
+volumes:
+  pgdata:
+  images:

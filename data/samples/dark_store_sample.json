@@ -1,0 +1,21 @@
+{
+  "_note": "SIMULATED sample data for development and demos. Not real stores, not real company data.",
+  "stores": [
+    {"store_id": "DS-BLR-001", "name": "Sample Dark Store - Koramangala", "city": "Bengaluru"},
+    {"store_id": "DS-BLR-002", "name": "Sample Dark Store - HSR Layout", "city": "Bengaluru"},
+    {"store_id": "DS-DEL-001", "name": "Sample Dark Store - Saket", "city": "New Delhi"},
+    {"store_id": "DS-MUM-001", "name": "Sample Dark Store - Andheri West", "city": "Mumbai"}
+  ],
+  "skus": [
+    {"sku_id": "SKU-MILK-500ML", "name": "Toned Milk 500 ml", "category": "Dairy", "packaging_type": "pouch"},
+    {"sku_id": "SKU-EGGS-6", "name": "Eggs (pack of 6)", "category": "Dairy & Eggs", "packaging_type": "tray"},
+    {"sku_id": "SKU-BREAD-400G", "name": "Whole Wheat Bread 400 g", "category": "Bakery", "packaging_type": "bag"},
+    {"sku_id": "SKU-CHIPS-52G", "name": "Potato Chips 52 g", "category": "Snacks", "packaging_type": "packet"},
+    {"sku_id": "SKU-COLA-300ML", "name": "Cola Can 300 ml", "category": "Beverages", "packaging_type": "can"},
+    {"sku_id": "SKU-SAUCE-500G", "name": "Tomato Ketchup 500 g", "category": "Condiments", "packaging_type": "jar"},
+    {"sku_id": "SKU-ATTA-5KG", "name": "Whole Wheat Atta 5 kg", "category": "Staples", "packaging_type": "bag"},
+    {"sku_id": "SKU-DETERGENT-1L", "name": "Liquid Detergent 1 L", "category": "Household", "packaging_type": "bottle"},
+    {"sku_id": "SKU-ICECREAM-700ML", "name": "Vanilla Ice Cream 700 ml", "category": "Frozen", "packaging_type": "tub"},
+    {"sku_id": "SKU-TEA-250G", "name": "Assam Tea 250 g", "category": "Beverages", "packaging_type": "box"}
+  ]
+}
